@@ -10,8 +10,9 @@ EXCHANGE_NAME = "Bybit"
 BOT_TOKEN = "8657789671:AAHgmek_WvxFrqkP_F0UomRS-rct1Vk7V1c"
 CHAT_ID = "5868749596"
 
-# Initialize Bybit
-exchange = ccxt.bybit({'enableRateLimit': True})
+
+# Initialize Gate.io (Cloud Friendly)
+exchange = ccxt.gateio({'enableRateLimit': True})
 
 def send_telegram_alert(message):
     """Sends a push notification to your Telegram."""

@@ -5,214 +5,169 @@ import time
 import streamlit as st
 import streamlit.components.v1 as components
 
-# Initialize Delta Exchange
-exchange = ccxt.delta({'enableRateLimit': True})
+# --- CONFIGURATION ---
+EXCHANGE_NAME = "Bybit"
+BOT_TOKEN = "8657789671:AAHgmek_WvxFrqkP_F0UomRS-rct1Vk7V1c"
+CHAT_ID = "5868749596"
 
-def send_telegram_alert(message, bot_token, chat_id):
+# Initialize Bybit
+exchange = ccxt.bybit({'enableRateLimit': True})
+
+def send_telegram_alert(message):
     """Sends a push notification to your Telegram."""
-    if not bot_token or not chat_id:
-        return
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {'chat_id': CHAT_ID, 'text': message, 'parse_mode': 'Markdown'}
     try:
-        requests.post(url, data=payload)
-    except Exception as e:
+        requests.post(url, data=payload, timeout=5)
+    except Exception:
         pass
 
-def get_base_filtered_coins(min_volume=500000, max_coins=200):
-    """Fetches high-volume coins directly from the exchange to prevent IP blocks."""
-    exchange.load_markets()
-    tickers = exchange.fetch_tickers()
-    
-    valid_symbols = []
-    for symbol, ticker in tickers.items():
-        if 'USDT' in symbol:
-            vol = ticker.get('quoteVolume', 0)
-            if vol is not None and vol >= min_volume:
-                valid_symbols.append(symbol)
-                
-    # Sort by volume and return top X coins
-    valid_symbols.sort(key=lambda s: tickers[s].get('quoteVolume', 0), reverse=True)
-    return valid_symbols[:max_coins]
+def get_base_filtered_coins(market_type, min_volume=50000, max_coins=250):
+    """Fetches high-volume coins directly from the exchange."""
+    try:
+        exchange.load_markets()
+        exchange.options['defaultType'] = market_type
+        tickers = exchange.fetch_tickers()
+        
+        valid_symbols = []
+        for symbol, ticker in tickers.items():
+            if '/USDT' in symbol or ':USDT' in symbol:
+                # Use quoteVolume (USDT volume) or baseVolume as fallback
+                vol = ticker.get('quoteVolume') or ticker.get('baseVolume', 0)
+                if vol and vol >= min_volume:
+                    valid_symbols.append(symbol)
+                    
+        # Sort by volume (Highest first)
+        valid_symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
+        return valid_symbols[:max_coins]
+    except Exception as e:
+        st.error(f"Error fetching markets: {e}")
+        return []
 
 def check_fibonacci_setup(symbol, timeframe):
-    """
-    Checks for Uptrend + 0.5/0.618 Golden Pocket OR 0.786 Deep Pullback.
-    """
+    """Mathematical engine to find Trend + Retest setups."""
     try:
-        # Fetch 100 candles (need enough for EMA 50 trend detection)
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         
-        if df.empty or len(df) < 60:
-            return None
+        if len(df) < 60: return None
 
-        # 1. TREND FILTER: Calculate 50 EMA
+        # 1. TREND: 50 EMA (Native Pandas calculation - very fast)
         df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
         current_price = df['close'].iloc[-1]
         current_ema = df['EMA_50'].iloc[-1]
         
-        # If price is below EMA 50, it's not a strong uptrend. Skip to avoid fakeouts.
+        # Only trade WITH the trend (Price must be above EMA 50)
         if current_price < current_ema:
             return None
 
-        # 2. SWING DETECTION (Last 50 candles)
+        # 2. SWING DETECTION: Find the most recent peak and the floor before it
         recent_df = df.tail(50).reset_index(drop=True)
-        
-        # Find the peak (Swing High)
         high_idx = recent_df['high'].idxmax()
         swing_high = recent_df['high'].max()
         
-        # Find the lowest point BEFORE the peak (Swing Low) - This ensures it's a true upward swing
-        if high_idx == 0: 
-            return None 
-            
+        if high_idx == 0: return None
         swing_low = recent_df.loc[:high_idx, 'low'].min()
         swing_range = swing_high - swing_low
         
-        if swing_range == 0:
-            return None
+        if swing_range == 0: return None
             
-        # 3. FIBONACCI CALCULATIONS (Measuring from Top to Bottom)
+        # 3. FIBONACCI LEVELS
         fib_0_5 = swing_high - (swing_range * 0.5)
         fib_0_618 = swing_high - (swing_range * 0.618)
         fib_0_786 = swing_high - (swing_range * 0.786)
         
-        # 4. ZONE CHECKS (Adding a tiny 0.3% buffer for wicks)
-        pocket_top = fib_0_5 * 1.003
-        pocket_bottom = fib_0_618 * 0.997
-        deep_pullback_zone = fib_0_786 * 0.995
-        
-        setup_type = None
-        
-        if pocket_bottom <= current_price <= pocket_top:
-            setup_type = "🟡 Golden Pocket (0.5 - 0.618)"
-        elif deep_pullback_zone <= current_price <= (fib_0_786 * 1.005):
-            setup_type = "🔴 Deep Pullback (0.786)"
+        # 4. TARGET ZONES (With small buffer for wicks)
+        if (fib_0_618 * 0.997) <= current_price <= (fib_0_5 * 1.003):
+            return {'symbol': symbol, 'type': 'Golden Pocket', 'price': current_price}
+        elif (fib_0_786 * 0.997) <= current_price <= (fib_0_786 * 1.005):
+            return {'symbol': symbol, 'type': 'Deep Pullback', 'price': current_price}
             
-        if setup_type:
-            return {
-                'symbol': symbol,
-                'type': setup_type,
-                'price': current_price
-            }
         return None
-        
     except Exception:
         return None
 
-def render_tradingview_widget(symbol):
-    """Embeds a live TradingView chart for the selected coin."""
-    tv_symbol = f"BINANCE:{symbol.replace('/', '').replace(':', '')}"
-    
-    html_code = f"""
-    <div class="tradingview-widget-container" style="height:100%;width:100%">
-      <div class="tradingview-widget-container__widget" style="height:calc(100% - 32px);width:100%"></div>
-      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
-      {{
-      "autosize": true,
-      "symbol": "{tv_symbol}",
-      "interval": "60",
-      "timezone": "Etc/UTC",
-      "theme": "dark",
-      "style": "1",
-      "locale": "en",
-      "enable_publishing": false,
-      "backgroundColor": "rgba(19, 23, 34, 1)",
-      "gridColor": "rgba(42, 46, 57, 0.06)",
-      "hide_top_toolbar": false,
-      "hide_legend": false,
-      "save_image": false,
-      "container_id": "tradingview_chart"
-    }}
-      </script>
+def render_chart(symbol):
+    """Embeds the TradingView interactive chart."""
+    clean_sym = symbol.split(':')[0].replace('/', '')
+    tv_symbol = f"BYBIT:{clean_sym}"
+    html = f"""
+    <div style="height:500px;">
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget({{
+        "autosize": true, "symbol": "{tv_symbol}", "interval": "60",
+        "timezone": "Etc/UTC", "theme": "dark", "style": "1",
+        "locale": "en", "enable_publishing": false, "allow_symbol_change": true,
+        "container_id": "tv_chart"
+      }});
+      </script><div id="tv_chart" style="height:100%;"></div>
     </div>
     """
-    components.html(html_code, height=500)
+    components.html(html, height=500)
 
-# --- UI DESIGN ---
-
-st.set_page_config(page_title="Shyamswayam Screener", page_icon="⚡", layout="wide")
+# --- APP INTERFACE ---
+st.set_page_config(page_title="Shyamswayam Screener", layout="wide")
 
 st.markdown("<h1 style='text-align: center; color: #00ffcc;'>⚡ Shyamswayam Trading Screener</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: gray;'>Pro-Trend Fibonacci Engine | Retests & Deep Pullbacks</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #888;'>Trend-Aligned Fibonacci Engine (Bybit)</p>", unsafe_allow_html=True)
 
-# Sidebar
 with st.sidebar:
-    st.header("⚙️ Screener Settings")
-    selected_tf = st.selectbox("⏳ Timeframe", ['5m', '15m', '1h', '2h', '4h', '1d', '1w'], index=2)
-    min_vol = st.number_input("💵 Min Volume ($)", value=500000, step=100000)
-    max_scan = st.slider("🔍 Coins to Scan", 50, 300, 150)
-    
+    st.header("⚙️ Scan Settings")
+    market_type = st.selectbox("Market Type", ['linear', 'spot'], help="Linear = Futures, Spot = Coins")
+    tf = st.selectbox("Timeframe", ['5m', '15m', '1h', '4h', '1d'], index=2)
+    vol_threshold = st.number_input("Min 24h Volume ($)", value=50000, step=10000)
     st.divider()
-    st.header("📲 Telegram Alerts Active")
-    # Credentials hardcoded as requested
-    tg_bot = st.text_input("Bot Token", value="8657789671:AAHgmek_WvxFrqkP_F0UomRS-rct1Vk7V1c", type="password")
-    tg_chat = st.text_input("Chat ID", value="5868749596", type="password")
-    st.caption("Your bot is connected and ready to send alerts.")
+    st.success("📲 Telegram Connected")
+    st.info("Strategy: Price > 50 EMA + Pullback to Fib levels")
 
-# Main Layout
-col1, col2 = st.columns([1, 1.5])
+col_scan, col_chart = st.columns([1, 1.4])
 
-with col1:
-    if st.button("🚀 Run Live Scan", use_container_width=True, type="primary"):
-        status_text = st.empty()
-        progress_bar = st.progress(0)
+with col_scan:
+    if st.button("🚀 START LIVE SCAN", use_container_width=True, type="primary"):
+        status = st.empty()
+        p_bar = st.progress(0)
         
-        status_text.text("Fetching market data...")
-        symbols = get_base_filtered_coins(min_volume=min_vol, max_coins=max_scan)
+        status.info("Searching high-volume markets...")
+        symbols = get_base_filtered_coins(market_type, min_volume=vol_threshold)
         
-        found_setups = []
+        golden_list = []
+        deep_list = []
         
-        status_text.text(f"Scanning {len(symbols)} charts on {selected_tf} timeframe...")
-        for i, sym in enumerate(symbols):
-            progress_bar.progress((i + 1) / len(symbols))
-            
-            result = check_fibonacci_setup(sym, timeframe=selected_tf)
-            if result:
-                found_setups.append(result)
+        status.info(f"Scanning {len(symbols)} charts...")
+        for i, s in enumerate(symbols):
+            p_bar.progress((i + 1) / len(symbols))
+            res = check_fibonacci_setup(s, tf)
+            if res:
+                if res['type'] == 'Golden Pocket':
+                    golden_list.append(res)
+                else:
+                    deep_list.append(res)
                 
-                # Trigger Telegram Alert using hardcoded credentials
-                if tg_bot and tg_chat:
-                    msg = f"🚨 *Shyamswayam Setup Detected!*\n\n🪙 *Coin:* {sym}\n⏳ *TF:* {selected_tf}\n🎯 *Zone:* {result['type']}\n💲 *Price:* {result['price']}"
-                    send_telegram_alert(msg, tg_bot, tg_chat)
-                    
-            time.sleep(0.05) # Rate limit safety
+                # Send Alert
+                msg = f"🚨 *Shyamswayam Setup!*\n\n🪙 {s}\n🎯 {res['type']}\n💲 Price: {res['price']}\n⏳ TF: {tf}"
+                send_telegram_alert(msg)
+            time.sleep(0.02)
             
-        status_text.success(f"Scan Complete! Found {len(found_setups)} trend-aligned setups.")
-        
-        # Display Results
-       # --- DISPLAY SEPARATED RESULTS ---
+        status.success(f"Scan complete! Found {len(golden_list) + len(deep_list)} setups.")
+
+        # --- RESULTS SECTIONS ---
         st.divider()
-        
-        # Filter the setups into two separate lists
-        golden_setups = [s for s in found_setups if "Golden Pocket" in s['type']]
-        pullback_setups = [s for s in found_setups if "Deep Pullback" in s['type']]
-
-        # Section 1: Golden Pocket
-        st.subheader("🟡 Golden Pocket Setups (0.5 - 0.618)")
-        if golden_setups:
-            for setup in golden_setups:
-                with st.expander(f"{setup['symbol']}", expanded=True):
-                    st.write(f"**Current Price:** {setup['price']}")
-                    st.write("🟢 Trend: Confirmed Uptrend (Above 50 EMA)")
+        st.subheader("🟡 Golden Pocket (0.5 - 0.618)")
+        if golden_list:
+            for item in golden_list:
+                st.success(f"**{item['symbol']}** — Price: {item['price']}")
         else:
-            st.info("No Golden Pocket setups found right now.")
+            st.write("No active golden pocket setups.")
 
-        # Section 2: Deep Pullback
-        st.subheader("🔴 Deep Pullback Setups (0.786)")
-        if pullback_setups:
-            for setup in pullback_setups:
-                with st.expander(f"{setup['symbol']}", expanded=True):
-                    st.write(f"**Current Price:** {setup['price']}")
-                    st.write("🟢 Trend: Confirmed Uptrend (Above 50 EMA)")
+        st.subheader("🔴 Deep Pullback (0.786)")
+        if deep_list:
+            for item in deep_list:
+                st.warning(f"**{item['symbol']}** — Price: {item['price']}")
         else:
-            st.info("No Deep Pullback setups found right now.")
+            st.write("No active deep pullback setups.")
 
-with col2:
-    st.markdown("### 📈 Live Chart Viewer")
-    st.write("Type a coin symbol below to load its live TradingView chart.")
-    chart_symbol = st.text_input("Enter Coin (e.g., BTC/USDT)", value="BTC/USDT")
-    
-    if chart_symbol:
-        render_tradingview_widget(chart_symbol)
+with col_chart:
+    st.subheader("📈 Live Interactive Chart")
+    target_sym = st.text_input("Enter Symbol to View", value="BTC/USDT").upper()
+    render_chart(target_sym)

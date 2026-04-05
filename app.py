@@ -4,8 +4,9 @@ import requests
 import time
 import streamlit as st
 
-# Initialize Binance exchange
-exchange = ccxt.binance({'enableRateLimit': True})
+
+# Initialize Delta Exchange
+exchange = ccxt.delta({'enableRateLimit': True})
 
 def get_base_filtered_coins(min_volume=100000, min_mcap_rank=150):
     """Fetches top coins from CoinGecko, filters by volume, returns Binance symbols."""

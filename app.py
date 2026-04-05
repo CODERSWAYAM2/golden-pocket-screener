@@ -182,13 +182,32 @@ with col1:
         status_text.success(f"Scan Complete! Found {len(found_setups)} trend-aligned setups.")
         
         # Display Results
-        if found_setups:
-            for setup in found_setups:
-                with st.expander(f"{setup['symbol']} - {setup['type']}", expanded=True):
+       # --- DISPLAY SEPARATED RESULTS ---
+        st.divider()
+        
+        # Filter the setups into two separate lists
+        golden_setups = [s for s in found_setups if "Golden Pocket" in s['type']]
+        pullback_setups = [s for s in found_setups if "Deep Pullback" in s['type']]
+
+        # Section 1: Golden Pocket
+        st.subheader("🟡 Golden Pocket Setups (0.5 - 0.618)")
+        if golden_setups:
+            for setup in golden_setups:
+                with st.expander(f"{setup['symbol']}", expanded=True):
                     st.write(f"**Current Price:** {setup['price']}")
-                    st.write("🟢 Trend: Uptrend (Above EMA 50)")
+                    st.write("🟢 Trend: Confirmed Uptrend (Above 50 EMA)")
         else:
-            st.info("No trend-aligned Fibonacci setups found right now. Wait for a pullback!")
+            st.info("No Golden Pocket setups found right now.")
+
+        # Section 2: Deep Pullback
+        st.subheader("🔴 Deep Pullback Setups (0.786)")
+        if pullback_setups:
+            for setup in pullback_setups:
+                with st.expander(f"{setup['symbol']}", expanded=True):
+                    st.write(f"**Current Price:** {setup['price']}")
+                    st.write("🟢 Trend: Confirmed Uptrend (Above 50 EMA)")
+        else:
+            st.info("No Deep Pullback setups found right now.")
 
 with col2:
     st.markdown("### 📈 Live Chart Viewer")

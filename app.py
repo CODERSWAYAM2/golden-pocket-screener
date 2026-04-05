@@ -9,16 +9,27 @@ import streamlit as st
 exchange = ccxt.delta({'enableRateLimit': True})
 
 def get_base_filtered_coins(min_volume=100000, min_mcap_rank=150):
-    """Fetches top coins from CoinGecko, filters by volume, returns Binance symbols."""
-    url = f"https://api.coingecko.com/api/v3/coins/markets"
-    params = {
-        'vs_currency': 'usd',
-        'order': 'market_cap_desc',
-        'per_page': min_mcap_rank,
-        'page': 1,
-        'sparkline': False
-    }
+    """Fetches all markets directly from the exchange and filters by volume."""
+    exchange.load_markets()
     
+    # Fetch 24hr data for every coin on the exchange at once
+    tickers = exchange.fetch_tickers()
+    
+    valid_symbols = []
+    for symbol, ticker in tickers.items():
+        # Only look at USDT pairs
+        if 'USDT' in symbol:
+            # quoteVolume is the 24h volume in Dollars (USDT)
+            vol = ticker.get('quoteVolume', 0)
+            
+            if vol is not None and vol >= min_volume:
+                valid_symbols.append(symbol)
+                
+    # Sort the list by highest volume first (this replaces "Market Cap" ranking)
+    valid_symbols.sort(key=lambda s: tickers[s].get('quoteVolume', 0), reverse=True)
+    
+    # Return only the top X coins so the app doesn't take 10 minutes to scan
+    return valid_symbols[:min_mcap_rank]
     response = requests.get(url, params=params)
     data = response.json()
     

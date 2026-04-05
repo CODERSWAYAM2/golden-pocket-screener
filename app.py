@@ -48,7 +48,7 @@ def check_fibonacci_setup(symbol, timeframe):
             return None
 
         # 1. TREND FILTER: Calculate 50 EMA
-        df['EMA_50'] = ta.ema(df['close'], length=50)
+        df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
         current_price = df['close'].iloc[-1]
         current_ema = df['EMA_50'].iloc[-1]
         

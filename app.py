@@ -5,8 +5,8 @@ import time
 import streamlit as st
 
 
-# Initialize Delta Exchange
-exchange = ccxt.delta({'enableRateLimit': True})
+# Initialize KuCoin exchange (Friendly to cloud servers)
+exchange = ccxt.kucoin({'enableRateLimit': True})
 
 def get_base_filtered_coins(min_volume=100000, min_mcap_rank=150):
     """Fetches all markets directly from the exchange and filters by volume."""

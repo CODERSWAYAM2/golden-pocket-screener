@@ -1,6 +1,6 @@
 import ccxt
 import pandas as pd
-import pandas-ta as ta
+import pandas_ta as ta
 import requests
 import time
 import streamlit as st

@@ -5,170 +5,280 @@ import time
 import streamlit as st
 import streamlit.components.v1 as components
 
+# --- PAGE CONFIGURATION & CUSTOM CSS ---
+st.set_page_config(page_title="Shyamswayam Trading", page_icon="⚡", layout="wide")
+
+custom_css = """
+<style>
+    /* Main Background - Deep Blue/Black Gradient */
+    .stApp {
+        background-color: #0a0e17;
+        background-image: radial-gradient(circle at 50% 0%, #161e2d 0%, #0a0e17 80%);
+        color: #e2e8f0;
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Sidebar Styling */
+    [data-testid="stSidebar"] {
+        background-color: #0f1522 !important;
+        border-right: 1px solid #d4af37;
+    }
+
+    /* Golden Action Button with Pulse Animation */
+    .stButton>button {
+        background: linear-gradient(135deg, #d4af37 0%, #f9e596 50%, #d4af37 100%);
+        color: #000000;
+        border: none;
+        border-radius: 8px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(212, 175, 55, 0.4);
+        width: 100%;
+        animation: pulse 2s infinite;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(212, 175, 55, 0.7);
+        color: #000;
+    }
+
+    /* Keyframe Animations */
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(212, 175, 55, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0); }
+    }
+
+    /* Custom Logo Container */
+    .brand-logo {
+        text-align: center;
+        padding: 25px 15px;
+        background: linear-gradient(180deg, rgba(212,175,55,0.1) 0%, rgba(10,14,23,0) 100%);
+        border: 1px solid rgba(212, 175, 55, 0.3);
+        border-radius: 12px;
+        margin-bottom: 25px;
+        box-shadow: inset 0 0 20px rgba(212,175,55,0.05);
+    }
+    .brand-title {
+        font-size: 2.2rem;
+        font-weight: 900;
+        background: -webkit-linear-gradient(#ffdf00, #d4af37);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin: 0;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+    }
+    .brand-subtitle {
+        color: #8b9bb4;
+        font-size: 0.9rem;
+        letter-spacing: 1px;
+        margin-top: 5px;
+    }
+
+    /* Metric Cards */
+    div[data-testid="stMetricValue"] {
+        color: #d4af37;
+    }
+</style>
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
+
+# --- SHYAMSWAYAM BRANDING HEADER ---
+st.markdown("""
+<div class="brand-logo">
+    <h1 class="brand-title">SHYAMSWAYAM</h1>
+    <div class="brand-subtitle">INSTITUTIONAL ALGORITHMIC SCREENER</div>
+</div>
+""", unsafe_allow_html=True)
+
 # --- CONFIGURATION ---
-EXCHANGE_NAME = "Bybit"
+EXCHANGE_NAME = "Gate.io"
 BOT_TOKEN = "8657789671:AAHgmek_WvxFrqkP_F0UomRS-rct1Vk7V1c"
 CHAT_ID = "5868749596"
 
-
-# Initialize Gate.io (Cloud Friendly)
 exchange = ccxt.gateio({'enableRateLimit': True})
 
 def send_telegram_alert(message):
-    """Sends a push notification to your Telegram."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {'chat_id': CHAT_ID, 'text': message, 'parse_mode': 'Markdown'}
-    try:
-        requests.post(url, data=payload, timeout=5)
-    except Exception:
-        pass
+    try: requests.post(url, data=payload, timeout=5)
+    except Exception: pass
 
-def get_base_filtered_coins(market_type, min_volume=50000, max_coins=250):
-    """Fetches high-volume coins directly from the exchange."""
+def get_base_filtered_coins(market_type, min_volume=30000, max_coins=250):
     try:
         exchange.load_markets()
         exchange.options['defaultType'] = market_type
         tickers = exchange.fetch_tickers()
-        
         valid_symbols = []
         for symbol, ticker in tickers.items():
-            if '/USDT' in symbol or ':USDT' in symbol:
-                # Use quoteVolume (USDT volume) or baseVolume as fallback
+            if '/USDT' in symbol:
                 vol = ticker.get('quoteVolume') or ticker.get('baseVolume', 0)
                 if vol and vol >= min_volume:
                     valid_symbols.append(symbol)
-                    
-        # Sort by volume (Highest first)
         valid_symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
         return valid_symbols[:max_coins]
-    except Exception as e:
-        st.error(f"Error fetching markets: {e}")
-        return []
+    except Exception: return []
 
-def check_fibonacci_setup(symbol, timeframe):
-    """Mathematical engine to find Trend + Retest setups."""
+def check_all_setups(symbol, timeframe):
+    """The Ultimate Mathematical Engine integrating SMC and Fib Strategies."""
     try:
-        bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
+        bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=120)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        
-        if len(df) < 60: return None
+        if len(df) < 100: return None
 
-        # 1. TREND: 50 EMA (Native Pandas calculation - very fast)
+        last_candle = df.iloc[-1]
+        prev_candle = df.iloc[-2]
+        current_price = last_candle['close']
+        is_green = current_price > last_candle['open']
+        is_red = current_price < last_candle['open']
+
+        # ==========================================================
+        # STRATEGY 1: SMC LIQUIDITY SWEEPS (Support / Resistance)
+        # ==========================================================
+        liq_window = df.iloc[-60:-4]
+        support_level = liq_window['low'].min()
+        resistance_level = liq_window['high'].max()
+
+        if last_candle['low'] < support_level and current_price > support_level and is_green:
+            return {'symbol': symbol, 'type': 'SMC Bullish', 'display_name': '🟢 Bullish SMC Sweep (Support)', 'price': current_price}
+
+        if last_candle['high'] > resistance_level and current_price < resistance_level and is_red:
+            return {'symbol': symbol, 'type': 'SMC Bearish', 'display_name': '🔴 Bearish SMC Sweep (Resistance)', 'price': current_price}
+
+        # ==========================================================
+        # STRATEGY 2: TREND-ALIGNED FIBONACCI SETUPS
+        # ==========================================================
         df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
-        current_price = df['close'].iloc[-1]
-        current_ema = df['EMA_50'].iloc[-1]
-        
-        # Only trade WITH the trend (Price must be above EMA 50)
-        if current_price < current_ema:
-            return None
+        if current_price < df['EMA_50'].iloc[-1]: return None
 
-        # 2. SWING DETECTION: Find the most recent peak and the floor before it
-        recent_df = df.tail(50).reset_index(drop=True)
+        recent_df = df.tail(60).reset_index(drop=True)
         high_idx = recent_df['high'].idxmax()
         swing_high = recent_df['high'].max()
-        
         if high_idx == 0: return None
+        
         swing_low = recent_df.loc[:high_idx, 'low'].min()
         swing_range = swing_high - swing_low
-        
         if swing_range == 0: return None
-            
-        # 3. FIBONACCI LEVELS
+
+        # Sideways Buffer Filter
+        if (swing_range / swing_low) * 100 < 1.5: return None
+
         fib_0_5 = swing_high - (swing_range * 0.5)
         fib_0_618 = swing_high - (swing_range * 0.618)
         fib_0_786 = swing_high - (swing_range * 0.786)
+
+        pocket_top = fib_0_5 * 1.002
+        pocket_bottom = fib_0_618 * 0.998
         
-        # 4. TARGET ZONES (With small buffer for wicks)
-        if (fib_0_618 * 0.997) <= current_price <= (fib_0_5 * 1.003):
-            return {'symbol': symbol, 'type': 'Golden Pocket', 'price': current_price}
-        elif (fib_0_786 * 0.997) <= current_price <= (fib_0_786 * 1.005):
-            return {'symbol': symbol, 'type': 'Deep Pullback', 'price': current_price}
-            
+        # --- A1 Liquidity Sweep ---
+        candles_after_high = recent_df.loc[high_idx:].reset_index(drop=True)
+        if len(candles_after_high) > 5:
+            zone_touches = candles_after_high[candles_after_high['low'] <= fib_0_618 * 1.005]
+            if not zone_touches.empty:
+                first_touch_low = zone_touches['low'].iloc[0]
+                first_touch_idx = zone_touches.index[0]
+                if len(candles_after_high) > first_touch_idx + 3:
+                    if is_green and last_candle['low'] < first_touch_low and current_price > first_touch_low:
+                        return {'symbol': symbol, 'type': 'A1 Sweep', 'display_name': '🔥 A1 Fib Liquidity Sweep', 'price': current_price}
+
+        # --- Strict Golden Pocket ---
+        if pocket_bottom <= current_price <= pocket_top:
+            if is_green and (current_price - last_candle['open']) / swing_range > 0.05:
+                if not (prev_candle['open'] > fib_0_5 and prev_candle['close'] < fib_0_618):
+                    return {'symbol': symbol, 'type': 'Golden Pocket', 'display_name': '🟡 Validated Golden Pocket', 'price': current_price}
+
+        # --- Deep Pullback ---
+        if (fib_0_786 * 0.997) <= current_price <= (fib_0_786 * 1.005) and is_green:
+            return {'symbol': symbol, 'type': 'Deep Pullback', 'display_name': '🔴 Deep Pullback (0.786)', 'price': current_price}
+
         return None
-    except Exception:
-        return None
+    except Exception: return None
 
 def render_chart(symbol):
-    """Embeds the TradingView interactive chart."""
     clean_sym = symbol.split(':')[0].replace('/', '')
-    tv_symbol = f"BYBIT:{clean_sym}"
+    tv_symbol = f"GATEIO:{clean_sym}"
     html = f"""
-    <div style="height:500px;">
-      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget({{
-        "autosize": true, "symbol": "{tv_symbol}", "interval": "60",
-        "timezone": "Etc/UTC", "theme": "dark", "style": "1",
-        "locale": "en", "enable_publishing": false, "allow_symbol_change": true,
-        "container_id": "tv_chart"
-      }});
-      </script><div id="tv_chart" style="height:100%;"></div>
+    <div style="height:600px; border: 1px solid #d4af37; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+            "autosize": true, "symbol": "{tv_symbol}", "interval": "60",
+            "timezone": "Etc/UTC", "theme": "dark", "style": "1",
+            "locale": "en", "backgroundColor": "#0a0e17", "gridColor": "#161e2d",
+            "hide_top_toolbar": false, "save_image": false,
+            "container_id": "tv_chart"
+        }});
+        </script>
+        <div id="tv_chart" style="height:100%;"></div>
     </div>
     """
-    components.html(html, height=500)
+    components.html(html, height=600)
 
-# --- APP INTERFACE ---
-st.set_page_config(page_title="Shyamswayam Screener", layout="wide")
-
-st.markdown("<h1 style='text-align: center; color: #00ffcc;'>⚡ Shyamswayam Trading Screener</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #888;'>Trend-Aligned Fibonacci Engine (Bybit)</p>", unsafe_allow_html=True)
-
+# --- UI LAYOUT ---
 with st.sidebar:
-    st.header("⚙️ Scan Settings")
-    market_type = st.selectbox("Market Type", ['linear', 'spot'], help="Linear = Futures, Spot = Coins")
-    tf = st.selectbox("Timeframe", ['5m', '15m', '1h', '4h', '1d'], index=2)
-    vol_threshold = st.number_input("Min 24h Volume ($)", value=50000, step=10000)
+    st.markdown("<h3 style='color: #d4af37;'>⚙️ ENGINE PARAMS</h3>", unsafe_allow_html=True)
+    m_type = st.selectbox("Market Type", ['spot'])
+    tf = st.selectbox("⏳ Timeframe", ['15m', '1h', '4h'], index=1)
+    vol_threshold = st.number_input("💵 Min Volume ($)", value=30000, step=10000)
     st.divider()
-    st.success("📲 Telegram Connected")
-    st.info("Strategy: Price > 50 EMA + Pullback to Fib levels")
+    st.markdown("🟢 **Status:** Active")
+    st.markdown("📡 **Telegram:** Connected")
 
-col_scan, col_chart = st.columns([1, 1.4])
+col_scan, col_chart = st.columns([1.2, 1.8])
 
 with col_scan:
-    if st.button("🚀 START LIVE SCAN", use_container_width=True, type="primary"):
+    if st.button("INITIALIZE SCAN"):
         status = st.empty()
         p_bar = st.progress(0)
+        status.info("Synchronizing with Exchange Data...")
+        symbols = get_base_filtered_coins(m_type, min_volume=vol_threshold)
         
-        status.info("Searching high-volume markets...")
-        symbols = get_base_filtered_coins(market_type, min_volume=vol_threshold)
+        all_results = []
+        status.info(f"Analyzing {len(symbols)} assets for Institutional Footprints...")
         
-        golden_list = []
-        deep_list = []
-        
-        status.info(f"Scanning {len(symbols)} charts...")
         for i, s in enumerate(symbols):
             p_bar.progress((i + 1) / len(symbols))
-            res = check_fibonacci_setup(s, tf)
+            res = check_all_setups(s, tf)
             if res:
-                if res['type'] == 'Golden Pocket':
-                    golden_list.append(res)
-                else:
-                    deep_list.append(res)
-                
-                # Send Alert
-                msg = f"🚨 *Shyamswayam Setup!*\n\n🪙 {s}\n🎯 {res['type']}\n💲 Price: {res['price']}\n⏳ TF: {tf}"
+                all_results.append(res)
+                msg = f"🚨 *Shyamswayam Alert*\n\n🪙 {s}\n🎯 {res['display_name']}\n⏳ TF: {tf}\n💲 Price: {res['price']}"
                 send_telegram_alert(msg)
-            time.sleep(0.02)
+            time.sleep(0.01)
             
-        status.success(f"Scan complete! Found {len(golden_list) + len(deep_list)} setups.")
-
-        # --- RESULTS SECTIONS ---
+        status.success(f"Execution Complete. {len(all_results)} high-probability targets identified.")
         st.divider()
-        st.subheader("🟡 Golden Pocket (0.5 - 0.618)")
-        if golden_list:
-            for item in golden_list:
-                st.success(f"**{item['symbol']}** — Price: {item['price']}")
-        else:
-            st.write("No active golden pocket setups.")
 
-        st.subheader("🔴 Deep Pullback (0.786)")
-        if deep_list:
-            for item in deep_list:
-                st.warning(f"**{item['symbol']}** — Price: {item['price']}")
-        else:
-            st.write("No active deep pullback setups.")
+        smc_bull = [s for s in all_results if s['type'] == 'SMC Bullish']
+        smc_bear = [s for s in all_results if s['type'] == 'SMC Bearish']
+        a1_sweep = [s for s in all_results if s['type'] == 'A1 Sweep']
+        golden = [s for s in all_results if s['type'] == 'Golden Pocket']
+        deep = [s for s in all_results if s['type'] == 'Deep Pullback']
+
+        st.markdown("<h4 style='color: #d4af37;'>💧 SMC LIQUIDITY SWEEPS</h4>", unsafe_allow_html=True)
+        if smc_bull or smc_bear:
+            for item in smc_bull: st.success(f"**{item['symbol']}** — Bullish Sweep at {item['price']}")
+            for item in smc_bear: st.error(f"**{item['symbol']}** — Bearish Sweep at {item['price']}")
+        else: st.caption("No SMC anomalies detected.")
+
+        st.markdown("<h4 style='color: #d4af37;'>🔥 A1 FIB LIQUIDITY SWEEP</h4>", unsafe_allow_html=True)
+        if a1_sweep:
+            for item in a1_sweep: st.error(f"**{item['symbol']}** — Swept Fib Low at {item['price']}")
+        else: st.caption("No A1 patterns active.")
+
+        st.markdown("<h4 style='color: #d4af37;'>🟡 VALIDATED GOLDEN POCKET</h4>", unsafe_allow_html=True)
+        if golden:
+            for item in golden: st.success(f"**{item['symbol']}** — Zone Held at {item['price']}")
+        else: st.caption("No validated pocket entries.")
+
+        st.markdown("<h4 style='color: #d4af37;'>🔴 DEEP PULLBACK (0.786)</h4>", unsafe_allow_html=True)
+        if deep:
+            for item in deep: st.warning(f"**{item['symbol']}** — Deep Retest at {item['price']}")
+        else: st.caption("No deep retests found.")
 
 with col_chart:
-    st.subheader("📈 Live Interactive Chart")
-    target_sym = st.text_input("Enter Symbol to View", value="BTC/USDT").upper()
-    render_chart(target_sym)
+    st.markdown("<h3 style='color: #d4af37;'>📈 TACTICAL OVERVIEW</h3>", unsafe_allow_html=True)
+    target_sym = st.text_input("Input Ticker (e.g., BTC/USDT)", value="BTC/USDT").upper()
+    if target_sym: render_chart(target_sym)

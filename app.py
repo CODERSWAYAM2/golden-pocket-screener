@@ -126,7 +126,7 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=250):
 def analyze_asset(exchange, symbol, tf):
     """
     The Ultimate Shyamswayam Mathematical Engine.
-    Includes: SMC Sweeps, 0.5-0.6 Golden Pockets, A1 Sweeps, & 0.786 Retests.
+    Includes: SMC Sweeps, Watchlist Radar, Golden Pockets, A1 Sweeps, & Deep Pullbacks.
     Operates STRICTLY on the closed candle.
     """
     try:
@@ -135,7 +135,6 @@ def analyze_asset(exchange, symbol, tf):
         if len(df) < 150: return None
 
         # --- THE 'JUST-CLOSED' CANDLE LOGIC ---
-        # iloc[-1] is the live moving candle. We ignore it completely.
         closed_candle = df.iloc[-2]
         prev_candle = df.iloc[-3]
         
@@ -145,28 +144,23 @@ def analyze_asset(exchange, symbol, tf):
 
         # ==========================================================
         # STRATEGY 1: SMC LIQUIDITY SWEEPS
-        # Lookback 150 candles (excluding recent 5) for true Support/Resistance
         # ==========================================================
         history = df.iloc[-150:-5]
         major_supp = history['low'].min()
         major_res = history['high'].max()
 
-        # Bullish Sweep: Wicked below Support, but closed back above as Green
         if c_low < major_supp and c_close > major_supp and is_green:
             return {'symbol': symbol, 'category': 'SMC', 'type': '🟢 Bullish Sweep', 'price': c_close}
             
-        # Bearish Sweep: Wicked above Resistance, but closed back below as Red
         if c_high > major_res and c_close < major_res and is_red:
             return {'symbol': symbol, 'category': 'SMC', 'type': '🔴 Bearish Sweep', 'price': c_close}
 
         # ==========================================================
         # STRATEGY 2: TREND-ALIGNED FIBONACCI
-        # Requires EMA 50 Uptrend, >1.5% Swing Range, and Strict Zone Validation
         # ==========================================================
         df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
         if c_close < df['EMA_50'].iloc[-2]: return None # Abort if against trend
 
-        # Find recent swing
         recent_window = df.iloc[-100:-2].reset_index(drop=True)
         h_idx = recent_window['high'].idxmax()
         swing_h = recent_window['high'].max()
@@ -181,7 +175,6 @@ def analyze_asset(exchange, symbol, tf):
         fib_786 = swing_h - (swing_rng * 0.786)
 
         # --- A1 Liquidity Sweep ---
-        # Rule: Find the 0.618 touch. Current candle must sweep that low and close green above it.
         after_high = recent_window.loc[h_idx:]
         if len(after_high) > 5:
             touches = after_high[after_high['low'] <= fib_618 * 1.005]
@@ -190,12 +183,15 @@ def analyze_asset(exchange, symbol, tf):
                 if is_green and c_low < first_low and c_close > first_low:
                     return {'symbol': symbol, 'category': 'FIB', 'type': '🔥 A1 Fib Sweep', 'price': c_close}
 
-        # --- 0.5 to 0.618 Golden Pocket ---
-        # Rule: Must close in zone. Must be green. Cannot be a direct red slam through the 0.5.
-        if (fib_618 * 0.998) <= c_close <= (fib_5 * 1.002):
-            if is_green and (c_close - c_open) / swing_rng > 0.05: # Solid Green Body requirement
-                if not (prev_candle['open'] > fib_5 and prev_candle['close'] < fib_618): # No Direct Slams
+        # --- 0.5 to 0.618 Pocket: Validation vs Watchlist ---
+        if (fib_618 * 0.998) <= c_close <= (fib_5 * 1.005):
+            # Check if it meets the Strict Validation rules
+            if is_green and (c_close - c_open) / swing_rng > 0.05: 
+                if not (prev_candle['open'] > fib_5 and prev_candle['close'] < fib_618): 
                     return {'symbol': symbol, 'category': 'FIB', 'type': '🟡 Validated 0.5-0.6 Pocket', 'price': c_close}
+            
+            # If it's in the zone but NOT validated yet (e.g. still red, setting up)
+            return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 Entering 0.5 Zone', 'price': c_close}
 
         # --- Deep 0.786 Pullback ---
         if (fib_786 * 0.998) <= c_close <= (fib_786 * 1.005) and is_green:
@@ -263,15 +259,17 @@ with col_control:
             res = analyze_asset(ex, s, tf)
             if res:
                 results.append(res)
-                send_telegram_alert(f"🏛️ *Shyamswayam Terminal*\n\n🪙 Ticker: {s}\n🎯 Setup: {res['type']}\n💲 Close: {res['price']}\n⏳ TF: {tf}\n🌐 Exch: {exch_choice}")
+                # Only send Telegram alerts for actual validated setups, not the watchlist.
+                if res['category'] != 'WATCH':
+                    send_telegram_alert(f"🏛️ *Shyamswayam Terminal*\n\n🪙 Ticker: {s}\n🎯 Setup: {res['type']}\n💲 Close: {res['price']}\n⏳ TF: {tf}\n🌐 Exch: {exch_choice}")
             time.sleep(0.01)
             
-        status.success(f"Scan complete. {len(results)} high-probability targets identified.")
+        status.success(f"Scan complete. {len([r for r in results if r['category'] != 'WATCH'])} confirmed setups identified.")
         bar.empty()
 
         # Display Results in Clean Tabs
         if results:
-            tab1, tab2, tab3 = st.tabs(["💧 SMC Sweeps", "📐 Fibonacci (0.5/0.6 & A1)", "📉 Deep Retest"])
+            tab1, tab2, tab3, tab4 = st.tabs(["💧 SMC Sweeps", "📐 Fibonacci", "📉 Deep Retest", "👀 Watchlist"])
             
             with tab1:
                 smc = [r for r in results if r['category'] == 'SMC']
@@ -290,6 +288,12 @@ with col_control:
                 if deep:
                     for r in deep: st.warning(f"**{r['symbol']}** — {r['type']} at {r['price']}")
                 else: st.caption("No deep 0.786 pullbacks detected.")
+                
+            with tab4:
+                watch = [r for r in results if r['category'] == 'WATCH']
+                if watch:
+                    for r in watch: st.markdown(f"<div style='border-left: 3px solid #8b949e; padding-left: 10px; margin-bottom: 10px;'>**{r['symbol']}** — {r['type']} at {r['price']}</div>", unsafe_allow_html=True)
+                else: st.caption("No assets are currently entering the 0.5-0.618 radar zone.")
         else:
             st.info("No valid trade setups currently detected on the closed candle.")
 

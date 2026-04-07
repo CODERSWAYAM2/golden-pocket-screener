@@ -220,6 +220,7 @@ def render_tv(symbol, exch):
     prefix = "GATEIO"
     if exch == "Bybit": prefix = "BYBIT"
     elif exch == "Delta Exchange": prefix = "DELTA"
+    elif exch == "Binance": prefix = "BINANCE"  # <-- Add this line!
     
     html = f"""
     <div style="height:550px; border: 1px solid #30363d; border-radius: 4px;">
@@ -245,7 +246,7 @@ st.markdown("<div class='brand-subtitle'>Institutional SMC & Fibonacci Analysis 
 
 with st.sidebar:
     st.markdown("### SYSTEM PARAMETERS")
-    exch_choice = st.selectbox("🌐 Data Provider", ['Gate.io', 'Bybit', 'Delta Exchange'])
+    exch_choice = st.selectbox("🌐 Data Provider", ['Gate.io', 'Bybit', 'Delta Exchange', 'Binance'])
     m_type = st.selectbox("📊 Market Asset", ['spot', 'linear'], help="Linear = Perpetual Futures")
     tf = st.selectbox("⏳ Timeframe Resolution", ['15m', '1h', '4h'], index=1)
     min_vol = st.number_input("💵 Min Volume (USD)", value=50000, step=10000)

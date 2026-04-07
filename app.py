@@ -121,6 +121,10 @@ def get_exchange(name):
 def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
     """Scans for active, liquid markets based on user volume thresholds."""
     try:
+        # If Binance is selected and you want Futures, switch to the Futures URL
+        if exchange.id == 'binance' and m_type == 'linear':
+            exchange.hostname = 'fapi.binance.com' 
+
         exchange.load_markets()
         if hasattr(exchange, 'options'): exchange.options['defaultType'] = m_type
         
@@ -133,7 +137,11 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
                 
         symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
         return symbols[:max_coins]
-    except Exception: return []
+        
+    except Exception as e: 
+        # THIS IS THE MAGIC FIX: It will now print the exact error on your screen!
+        st.error(f"⚠️ {exchange.name} failed to load markets. Error: {e}")
+        return []
 
 def analyze_asset(exchange, symbol, tf):
     """

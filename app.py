@@ -98,23 +98,33 @@ def send_telegram_alert(message):
 
 # Notice: We deleted @st.cache_resource so it never remembers the 451 error!
 def get_exchange(name):
-    """Initializes the selected exchange dynamically."""
-    options = {'enableRateLimit': True}
-    
-    if name == "Bybit": 
-        return ccxt.bybit(options)
-    elif name == "Delta Exchange": 
-        return ccxt.delta(options)
-    elif name == "Binance":
-        # Force the Spot Bypass every single time
-        binance_options = {
+    """Initializes the selected exchange with heavy-duty India bypass."""
+    if name == "Binance":
+        # Create the exchange object
+        exch = ccxt.binance({
             'enableRateLimit': True,
-            'hostname': 'api.binance.me', 
             'options': {'defaultType': 'spot'}
-        }
-        return ccxt.binance(binance_options)
+        })
         
-    return ccxt.gateio(options)
+        # 🚨 BRUTE FORCE OVERWRITE 🚨
+        # We replace the blocked .com URLs with the working mirror domains
+        exch.urls['api']['public'] = 'https://api.binance.me/api/v3'
+        exch.urls['api']['private'] = 'https://api.binance.me/api/v3'
+        
+        # This is the specific one for loading market data (exchangeInfo)
+        exch.hostname = 'api.binance.me' 
+        
+        # Backup data mirror if api.binance.me is busy
+        # exch.urls['api']['public'] = 'https://data.binance.com/api/v3'
+        
+        return exch
+        
+    elif name == "Bybit": 
+        return ccxt.bybit({'enableRateLimit': True})
+    elif name == "Delta Exchange": 
+        return ccxt.delta({'enableRateLimit': True})
+        
+    return ccxt.gateio({'enableRateLimit': True})
 
 # ==========================================
 # 3. CORE ALGORITHM ENGINE

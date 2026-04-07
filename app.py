@@ -96,6 +96,7 @@ def send_telegram_alert(message):
     try: requests.post(url, data=payload, timeout=5)
     except Exception: pass
 
+# Notice: We deleted @st.cache_resource so it never remembers the 451 error!
 def get_exchange(name):
     """Initializes the selected exchange dynamically."""
     options = {'enableRateLimit': True}
@@ -105,7 +106,7 @@ def get_exchange(name):
     elif name == "Delta Exchange": 
         return ccxt.delta(options)
     elif name == "Binance":
-        # Add the special ISP bypass settings specifically for Binance
+        # Force the Spot Bypass every single time
         binance_options = {
             'enableRateLimit': True,
             'hostname': 'api.binance.me', 

@@ -99,14 +99,26 @@ def send_telegram_alert(message):
 def get_exchange(name):
     """Initializes the selected exchange dynamically."""
     options = {'enableRateLimit': True}
-    if name == "Bybit": return ccxt.bybit(options)
-    elif name == "Delta Exchange": return ccxt.delta(options)
+    
+    if name == "Bybit": 
+        return ccxt.bybit(options)
+    elif name == "Delta Exchange": 
+        return ccxt.delta(options)
+    elif name == "Binance":
+        # Add the special ISP bypass settings specifically for Binance
+        binance_options = {
+            'enableRateLimit': True,
+            'hostname': 'api.binance.me', 
+            'options': {'defaultType': 'spot'}
+        }
+        return ccxt.binance(binance_options)
+        
     return ccxt.gateio(options)
 
 # ==========================================
 # 3. CORE ALGORITHM ENGINE
 # ==========================================
-def get_markets(exchange, m_type, min_vol=50000, max_coins=250):
+def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
     """Scans for active, liquid markets based on user volume thresholds."""
     try:
         exchange.load_markets()

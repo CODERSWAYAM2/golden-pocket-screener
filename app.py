@@ -121,9 +121,15 @@ def get_exchange(name):
 def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
     """Scans for active, liquid markets based on user volume thresholds."""
     try:
-        # If Binance is selected and you want Futures, switch to the Futures URL
-        if exchange.id == 'binance' and m_type == 'linear':
-            exchange.hostname = 'fapi.binance.com' 
+        # 🚨 THE BRUTE-FORCE BYPASS 🚨
+        if exchange.id == 'binance':
+            if m_type == 'linear':
+                # Binance Futures is heavily blocked. We warn you and stop the scan.
+                st.warning("⚠️ Binance Futures is strictly blocked in your region. Switch 'Market Asset' to 'spot'.")
+                return []
+            else:
+                # Force the spot mirror domain right before loading!
+                exchange.hostname = 'api.binance.me'
 
         exchange.load_markets()
         if hasattr(exchange, 'options'): exchange.options['defaultType'] = m_type
@@ -139,8 +145,7 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
         return symbols[:max_coins]
         
     except Exception as e: 
-        # THIS IS THE MAGIC FIX: It will now print the exact error on your screen!
-        st.error(f"⚠️ {exchange.name} failed to load markets. Error: {e}")
+        st.error(f"⚠️ {exchange.name} failed. Error: {e}")
         return []
 
 def analyze_asset(exchange, symbol, tf):

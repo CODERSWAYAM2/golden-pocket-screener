@@ -176,7 +176,7 @@ def analyze_asset(exchange, symbol, tf):
             if df['high'].iloc[j] == high_window.max():
                 pivot_high = df['high'].iloc[j]
                 if c_high > pivot_high and c_close < pivot_high and is_red:
-                    # Book Confirmation: Vector Candle Engulfs Previous Low
+                    # Vector Candle Engulfs Previous Low
                     if c_close < prev_candle['low']:
                         return {'symbol': symbol, 'category': 'SMC', 'type': '🔴 BSL Sweep + Vector Displacement', 'price': c_close}
                     else:
@@ -189,7 +189,7 @@ def analyze_asset(exchange, symbol, tf):
             if df['low'].iloc[j] == low_window.min():
                 pivot_low = df['low'].iloc[j]
                 if c_low < pivot_low and c_close > pivot_low and is_green:
-                    # Book Confirmation: Vector Candle Engulfs Previous High
+                    # Vector Candle Engulfs Previous High
                     if c_close > prev_candle['high']:
                         return {'symbol': symbol, 'category': 'SMC', 'type': '🟢 SSL Sweep + Vector Displacement', 'price': c_close}
                     else:
@@ -224,23 +224,15 @@ def analyze_asset(exchange, symbol, tf):
                 if is_green and c_low < pocket_low and c_close > pocket_low:
                     return {'symbol': symbol, 'category': 'FIB', 'type': '🔥 A1 Fib Sweep', 'price': c_close}
 
-        # --- 0.5 to 0.618 Golden Pocket ---
-        in_pocket = (fib_618 * 0.998) <= c_close <= (fib_5 * 1.005)
-        swept_pocket = c_low <= fib_5 and c_low >= (fib_786 * 0.99)
-        
-        if swept_pocket or in_pocket:
-            # 1. THE NEW UPGRADE: Internal BOS / ChoCh Confirmation (Strongest Signal)
-            if is_green and c_close > prev_candle['high']:
-                return {'symbol': symbol, 'category': 'FIB', 'type': '👑 Golden Pocket + BOS Confirmed', 'price': c_close}
-            
-            # 2. YOUR RESTORED LOGIC: Strong Momentum Validation 
-            if in_pocket and is_green and (c_close - c_open) / swing_rng > 0.05: 
+        # --- 0.5 to 0.618 Pocket: Validation vs Watchlist ---
+        if (fib_618 * 0.998) <= c_close <= (fib_5 * 1.005):
+            # Check if it meets the Strict Validation rules
+            if is_green and (c_close - c_open) / swing_rng > 0.05: 
                 if not (prev_candle['open'] > fib_5 and prev_candle['close'] < fib_618): 
                     return {'symbol': symbol, 'category': 'FIB', 'type': '🟡 Validated 0.5-0.6 Pocket', 'price': c_close}
             
-            # 3. YOUR RESTORED LOGIC: Watchlist Radar (Still setting up)
-            if in_pocket:
-                return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 Entering 0.5 Zone', 'price': c_close}
+            # If it's in the zone but NOT validated yet (e.g. still red, setting up)
+            return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 Entering 0.5 Zone', 'price': c_close}
 
         # --- Deep 0.786 Pullback ---
         if (fib_786 * 0.998) <= c_close <= (fib_786 * 1.005) and is_green:

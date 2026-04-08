@@ -161,24 +161,27 @@ def analyze_asset(exchange, symbol, tf):
         c_high = df['high'].iloc[-2]
         c_low = df['low'].iloc[-2]
         c_close = df['close'].iloc[-2]
+        prev_candle = df.iloc[-3]
         
         is_green = c_close > c_open
         is_red = c_close < c_open
 
         # ==========================================================
-        # STRATEGY 1: SMC LIQUIDITY SWEEPS (FRACTAL BASED)
+        # STRATEGY 1: ADVANCED ICT SMC SWEEPS (Sweep + Displacement)
         # ==========================================================
         lookback = 5 
-        # Scan backward from the candle before the closed candle to find the pivot
         for j in range(len(df) - 3, lookback - 1, -1):
-            
             # 🔴 Bearish Sweep (BSL)
             high_window = df['high'].iloc[j - lookback : j + lookback + 1]
             if df['high'].iloc[j] == high_window.max():
                 pivot_high = df['high'].iloc[j]
                 if c_high > pivot_high and c_close < pivot_high and is_red:
-                    return {'symbol': symbol, 'category': 'SMC', 'type': '🔴 Bearish Sweep', 'price': c_close}
-                break # Stop at the most recent pivot high
+                    # Book Confirmation: Vector Candle Engulfs Previous Low
+                    if c_close < prev_candle['low']:
+                        return {'symbol': symbol, 'category': 'SMC', 'type': '🔴 BSL Sweep + Vector Displacement', 'price': c_close}
+                    else:
+                        return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 BSL Swept (Need Displacement)', 'price': c_close}
+                break 
 
         for j in range(len(df) - 3, lookback - 1, -1):
             # 🟢 Bullish Sweep (SSL)
@@ -186,8 +189,12 @@ def analyze_asset(exchange, symbol, tf):
             if df['low'].iloc[j] == low_window.min():
                 pivot_low = df['low'].iloc[j]
                 if c_low < pivot_low and c_close > pivot_low and is_green:
-                    return {'symbol': symbol, 'category': 'SMC', 'type': '🟢 Bullish Sweep', 'price': c_close}
-                break # Stop at the most recent pivot low
+                    # Book Confirmation: Vector Candle Engulfs Previous High
+                    if c_close > prev_candle['high']:
+                        return {'symbol': symbol, 'category': 'SMC', 'type': '🟢 SSL Sweep + Vector Displacement', 'price': c_close}
+                    else:
+                        return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 SSL Swept (Need Displacement)', 'price': c_close}
+                break 
 
         # ==========================================================
         # STRATEGY 2: TREND-ALIGNED FIBONACCI
@@ -209,25 +216,31 @@ def analyze_asset(exchange, symbol, tf):
         fib_786 = swing_h - (swing_rng * 0.786)
 
         # --- A1 Liquidity Sweep ---
-        # Look for a previous low that dipped into the golden pocket, which our closed candle just swept.
         after_high = recent_window.loc[h_idx:]
         if len(after_high) > 3:
             pocket_touches = after_high[(after_high['low'] <= fib_5) & (after_high['low'] >= fib_786)]
             if not pocket_touches.empty:
-                # Find the lowest point made inside the pocket before the current candle
                 pocket_low = pocket_touches['low'].min()
-                # A1 Sweep condition: Wick below the pocket low, but close above it
                 if is_green and c_low < pocket_low and c_close > pocket_low:
                     return {'symbol': symbol, 'category': 'FIB', 'type': '🔥 A1 Fib Sweep', 'price': c_close}
 
-        # --- 0.5 to 0.618 Pocket: Validation vs Watchlist ---
-        if (fib_618 * 0.998) <= c_close <= (fib_5 * 1.005):
-            prev_candle = df.iloc[-3]
-            if is_green and (c_close - c_open) / swing_rng > 0.05: 
+        # --- 0.5 to 0.618 Golden Pocket ---
+        in_pocket = (fib_618 * 0.998) <= c_close <= (fib_5 * 1.005)
+        swept_pocket = c_low <= fib_5 and c_low >= (fib_786 * 0.99)
+        
+        if swept_pocket or in_pocket:
+            # 1. THE NEW UPGRADE: Internal BOS / ChoCh Confirmation (Strongest Signal)
+            if is_green and c_close > prev_candle['high']:
+                return {'symbol': symbol, 'category': 'FIB', 'type': '👑 Golden Pocket + BOS Confirmed', 'price': c_close}
+            
+            # 2. YOUR RESTORED LOGIC: Strong Momentum Validation 
+            if in_pocket and is_green and (c_close - c_open) / swing_rng > 0.05: 
                 if not (prev_candle['open'] > fib_5 and prev_candle['close'] < fib_618): 
                     return {'symbol': symbol, 'category': 'FIB', 'type': '🟡 Validated 0.5-0.6 Pocket', 'price': c_close}
             
-            return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 Entering 0.5 Zone', 'price': c_close}
+            # 3. YOUR RESTORED LOGIC: Watchlist Radar (Still setting up)
+            if in_pocket:
+                return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 Entering 0.5 Zone', 'price': c_close}
 
         # --- Deep 0.786 Pullback ---
         if (fib_786 * 0.998) <= c_close <= (fib_786 * 1.005) and is_green:

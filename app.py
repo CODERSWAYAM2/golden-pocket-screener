@@ -46,20 +46,22 @@ CLASSY_CSS = """
         color: #0d1117;
         border-color: #d4af37;
     }
-    /* Institutional Result Card */
-    .result-card {
-        background-color: #161b22;
-        border-left: 4px solid #d4af37;
-        padding: 15px;
-        border-radius: 4px;
-        margin-bottom: 12px;
-        font-size: 1.1rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    /* Tab Styling for clean organization */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
     }
-    .symbol-label { font-weight: 800; color: #ffffff; font-size: 1.2rem; }
-    .price-label { color: #d4af37; font-family: monospace; font-weight: bold; }
-    .setup-label { color: #8b949e; font-size: 0.95rem; margin-top: 5px; }
-    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 0px;
+        color: #8b949e;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #d4af37 !important;
+        border-bottom: 2px solid #d4af37 !important;
+    }
     /* Branding */
     .brand-title {
         font-size: 2rem;
@@ -105,20 +107,23 @@ def get_exchange(name):
         exch.urls['api']['private'] = 'https://api.binance.me/api/v3'
         exch.hostname = 'api.binance.me' 
         return exch
+        
     elif name == "Bybit": 
         return ccxt.bybit({'enableRateLimit': True})
     elif name == "Delta Exchange": 
         return ccxt.delta({'enableRateLimit': True})
+        
     return ccxt.gateio({'enableRateLimit': True})
 
 # ==========================================
 # 3. CORE ALGORITHM ENGINE
 # ==========================================
 def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
+    """Scans for active, liquid markets based on user volume thresholds."""
     try:
         if exchange.id == 'binance':
             if m_type == 'linear':
-                st.warning("⚠️ Binance Futures is strictly blocked. Switch 'Market Asset' to 'spot'.")
+                st.warning("⚠️ Binance Futures is strictly blocked in your region. Switch 'Market Asset' to 'spot'.")
                 return []
             else:
                 exchange.hostname = 'api.binance.me'
@@ -135,133 +140,100 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
                 
         symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
         return symbols[:max_coins]
+        
     except Exception as e: 
         st.error(f"⚠️ {exchange.name} failed. Error: {e}")
         return []
 
-def analyze_asset(exchange, symbol, tf, target_strategy):
+def analyze_asset(exchange, symbol, tf):
     """
-    Advanced Live Market Engine.
-    Incorporates Break of Structure (BOS), ICT Traps, and exact Live Pricing.
+    The Ultimate Shyamswayam Mathematical Engine.
+    Includes: SMC Sweeps, Watchlist Radar, Golden Pockets, A1 Sweeps, & Deep Pullbacks.
+    Operates STRICTLY on the closed candle.
     """
     try:
-        bars = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=250)
+        bars = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=200)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        if len(df) < 200: return None
+        if len(df) < 150: return None
 
-        # 🚨 STRICT LIVE MARKET DATA (Currently Ticking Candle) 🚨
-        live_candle = df.iloc[-1]
-        live_price = live_candle['close']
-        c_low = live_candle['low']
-        c_high = live_candle['high']
+        # --- THE 'JUST-CLOSED' CANDLE LOGIC ---
+        c_open = df['open'].iloc[-2]
+        c_high = df['high'].iloc[-2]
+        c_low = df['low'].iloc[-2]
+        c_close = df['close'].iloc[-2]
         
-        setups = []
+        is_green = c_close > c_open
+        is_red = c_close < c_open
 
         # ==========================================================
-        # STRATEGY 1: ICT LIQUIDITY SWEEPS (The Trap)
+        # STRATEGY 1: SMC LIQUIDITY SWEEPS (FRACTAL BASED)
         # ==========================================================
-       # ---------------------------------------------------------
-        # STRATEGY 1: ADVANCED ICT LIQUIDITY SWEEPS (JUDAS SWING & TRAPS)
-        # ---------------------------------------------------------
-        # 1. Define Fractal Swing Highs (BSL) and Swing Lows (SSL)
-        # A true liquidity pool requires 2 lower highs on the left, and 2 on the right.
-        df['swing_high'] = (df['high'] > df['high'].shift(1)) & (df['high'] > df['high'].shift(2)) & \
-                           (df['high'] > df['high'].shift(-1)) & (df['high'] > df['high'].shift(-2))
-                           
-        df['swing_low'] = (df['low'] < df['low'].shift(1)) & (df['low'] < df['low'].shift(2)) & \
-                          (df['low'] < df['low'].shift(-1)) & (df['low'] < df['low'].shift(-2))
-
-        # 2. Extract the 5 most recent unmitigated Liquidity Pools
-        recent_bsl = df[df['swing_high']]['high'].dropna().iloc[-5:].values
-        recent_ssl = df[df['swing_low']]['low'].dropna().iloc[-5:].values
-        
-        sweep_detected = False
-
-        # 3. BEARISH TRAP EVALUATION (Sweeping Buy-Side Liquidity to short)
-        for bsl in recent_bsl:
-            # Did the live candle pierce the Liquidity Pool?
-            if c_high > bsl:
-                # Is the live price currently trapped back BELOW the pool?
-                if live_price < bsl:
-                    total_candle_size = c_high - c_low
-                    rejection_size = c_high - live_price
-                    
-                    # 🚨 REJECTION BLOCK FILTER: The wick must be significant (>40% of the candle)
-                    # This proves institutional displacement away from the sweep.
-                    if total_candle_size > 0 and (rejection_size / total_candle_size) >= 0.40:
-                        setups.append({
-                            'strategy': 'ICT Liquidity Sweeps', 
-                            'type': f'🔴 Bearish Judas Swing (Swept BSL @ ${bsl:,.4f}){fvg_text}',
-                            'price': live_price
-                        })
-                        sweep_detected = True
-                        break # Stop checking older pools; we have a valid live trap
-
-        # 4. BULLISH TRAP EVALUATION (Sweeping Sell-Side Liquidity to long)
-        if not sweep_detected:
-            for ssl in recent_ssl:
-                # Did the live candle pierce the Liquidity Pool?
-                if c_low < ssl:
-                    # Is the live price currently trapped back ABOVE the pool?
-                    if live_price > ssl:
-                        total_candle_size = c_high - c_low
-                        rejection_size = live_price - c_low
-                        
-                        # 🚨 REJECTION BLOCK FILTER: Strong wick rejection required
-                        if total_candle_size > 0 and (rejection_size / total_candle_size) >= 0.40:
-                            setups.append({
-                                'strategy': 'ICT Liquidity Sweeps', 
-                                'type': f'🟢 Bullish Judas Swing (Swept SSL @ ${ssl:,.4f}){fvg_text}',
-                                'price': live_price
-                            })
-                            break
-
-        # ==========================================================
-        # STRATEGY 2 & 3: BOS + GOLDEN POCKET / A1 SWEEPS
-        # ==========================================================
-        # 1. Find impulsive Swing High
-        impulse_high_idx = df['high'].iloc[-100:-1].idxmax()
-        impulse_high = df['high'].iloc[impulse_high_idx]
-        
-        # 2. Find the Swing Low that started the impulse
-        impulse_low_idx = df['low'].iloc[-200:impulse_high_idx].idxmin()
-        impulse_low = df['low'].iloc[impulse_low_idx]
-        
-        # 3. Locate the previous peak before this move started
-        prior_peak_window = df['high'].iloc[-250:impulse_low_idx]
-        
-        if not prior_peak_window.empty:
-            prior_peak = prior_peak_window.max()
+        lookback = 5 
+        # Scan backward from the candle before the closed candle to find the pivot
+        for j in range(len(df) - 3, lookback - 1, -1):
             
-            # 🔥 BOS VALIDATION: The new impulse high MUST be higher than the prior peak
-            if impulse_high > prior_peak:
-                swing_rng = impulse_high - impulse_low
-                
-                # Must be a valid move (e.g., > 1% distance)
-                if swing_rng > 0 and (swing_rng / impulse_low) * 100 > 1.0:
-                    fib_500 = impulse_high - (swing_rng * 0.5)
-                    fib_618 = impulse_high - (swing_rng * 0.618)
-                    fib_786 = impulse_high - (swing_rng * 0.786)
-                    
-                    # 🎯 LIVE GOLDEN POCKET: Live ticking price is strictly inside the 0.5 - 0.618 zone
-                    if fib_618 <= live_price <= fib_500:
-                        setups.append({'symbol': symbol, 'strategy': 'Golden Pocket', 'type': '🟡 Live inside Golden Pocket (BOS Verified)', 'price': live_price})
-                    
-                    # 🔥 A1 SWEEP: Wicks below the 0.618, but live price recovered inside the pocket
-                    if c_low < fib_618 and fib_618 < live_price <= fib_500:
-                        setups.append({'symbol': symbol, 'strategy': 'A1 Sweeps', 'type': '🔥 A1 Sweep Active (Hunted 0.618 Stops)', 'price': live_price})
-                        
-                    # 📉 DEEP PULLBACK
-                    if (fib_786 * 0.998) <= live_price <= (fib_786 * 1.002):
-                        setups.append({'symbol': symbol, 'strategy': 'Deep Pullbacks', 'type': '🔴 0.786 Deep Pullback', 'price': live_price})
+            # 🔴 Bearish Sweep (BSL)
+            high_window = df['high'].iloc[j - lookback : j + lookback + 1]
+            if df['high'].iloc[j] == high_window.max():
+                pivot_high = df['high'].iloc[j]
+                if c_high > pivot_high and c_close < pivot_high and is_red:
+                    return {'symbol': symbol, 'category': 'SMC', 'type': '🔴 Bearish Sweep', 'price': c_close}
+                break # Stop at the most recent pivot high
 
-        # --- Filter Logic ---
-        if target_strategy == 'ALL STRATEGIES':
-            return setups if setups else None
-        else:
-            filtered = [s for s in setups if s['strategy'] == target_strategy]
-            return filtered if filtered else None
+        for j in range(len(df) - 3, lookback - 1, -1):
+            # 🟢 Bullish Sweep (SSL)
+            low_window = df['low'].iloc[j - lookback : j + lookback + 1]
+            if df['low'].iloc[j] == low_window.min():
+                pivot_low = df['low'].iloc[j]
+                if c_low < pivot_low and c_close > pivot_low and is_green:
+                    return {'symbol': symbol, 'category': 'SMC', 'type': '🟢 Bullish Sweep', 'price': c_close}
+                break # Stop at the most recent pivot low
 
+        # ==========================================================
+        # STRATEGY 2: TREND-ALIGNED FIBONACCI
+        # ==========================================================
+        df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+        if c_close < df['EMA_50'].iloc[-2]: return None # Abort if against trend
+
+        recent_window = df.iloc[-100:-2].reset_index(drop=True)
+        h_idx = recent_window['high'].idxmax()
+        swing_h = recent_window['high'].max()
+        if h_idx == 0: return None
+        
+        swing_l = recent_window.loc[:h_idx, 'low'].min()
+        swing_rng = swing_h - swing_l
+        if swing_rng == 0 or (swing_rng / swing_l) * 100 < 1.5: return None
+
+        fib_5 = swing_h - (swing_rng * 0.5)
+        fib_618 = swing_h - (swing_rng * 0.618)
+        fib_786 = swing_h - (swing_rng * 0.786)
+
+        # --- A1 Liquidity Sweep ---
+        # Look for a previous low that dipped into the golden pocket, which our closed candle just swept.
+        after_high = recent_window.loc[h_idx:]
+        if len(after_high) > 3:
+            pocket_touches = after_high[(after_high['low'] <= fib_5) & (after_high['low'] >= fib_786)]
+            if not pocket_touches.empty:
+                # Find the lowest point made inside the pocket before the current candle
+                pocket_low = pocket_touches['low'].min()
+                # A1 Sweep condition: Wick below the pocket low, but close above it
+                if is_green and c_low < pocket_low and c_close > pocket_low:
+                    return {'symbol': symbol, 'category': 'FIB', 'type': '🔥 A1 Fib Sweep', 'price': c_close}
+
+        # --- 0.5 to 0.618 Pocket: Validation vs Watchlist ---
+        if (fib_618 * 0.998) <= c_close <= (fib_5 * 1.005):
+            prev_candle = df.iloc[-3]
+            if is_green and (c_close - c_open) / swing_rng > 0.05: 
+                if not (prev_candle['open'] > fib_5 and prev_candle['close'] < fib_618): 
+                    return {'symbol': symbol, 'category': 'FIB', 'type': '🟡 Validated 0.5-0.6 Pocket', 'price': c_close}
+            
+            return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 Entering 0.5 Zone', 'price': c_close}
+
+        # --- Deep 0.786 Pullback ---
+        if (fib_786 * 0.998) <= c_close <= (fib_786 * 1.005) and is_green:
+            return {'symbol': symbol, 'category': 'DEEP', 'type': '🔴 0.786 Deep Pullback', 'price': c_close}
+
+        return None
     except Exception: return None
 
 # ==========================================
@@ -272,14 +244,14 @@ def render_tv(symbol, exch):
     prefix = "GATEIO"
     if exch == "Bybit": prefix = "BYBIT"
     elif exch == "Delta Exchange": prefix = "DELTA"
-    elif exch == "Binance": prefix = "BINANCE"
+    elif exch == "Binance": prefix = "BINANCE"  
     
     html = f"""
     <div style="height:550px; border: 1px solid #30363d; border-radius: 4px;">
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         <script type="text/javascript">
         new TradingView.widget({{
-            "autosize": true, "symbol": "{prefix}:{sym}", "interval": "15",
+            "autosize": true, "symbol": "{prefix}:{sym}", "interval": "60",
             "timezone": "Etc/UTC", "theme": "dark", "style": "1",
             "locale": "en", "backgroundColor": "#0d1117", "gridColor": "#161b22",
             "hide_top_toolbar": false, "container_id": "tv"
@@ -294,32 +266,20 @@ def render_tv(symbol, exch):
 # 5. DASHBOARD LAYOUT
 # ==========================================
 st.markdown("<div class='brand-title'>SHYAMSWAYAM TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='brand-subtitle'>Institutional SMC & Live Fibonacci Analysis Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='brand-subtitle'>Institutional SMC & Fibonacci Analysis Engine</div>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown("### 🎯 STRATEGY SELECTOR")
-    strategy_choice = st.selectbox("Select Protocol:", [
-        'ALL STRATEGIES', 
-        'Golden Pocket', 
-        'A1 Sweeps', 
-        'ICT Liquidity Sweeps',
-        'Deep Pullbacks'
-    ])
-    st.divider()
-    
-    st.markdown("### ⚙️ SYSTEM PARAMETERS")
-    exch_choice = st.selectbox("🌐 Data Provider", ['Binance', 'Gate.io', 'Bybit', 'Delta Exchange'])
-    m_type = st.selectbox("📊 Market Asset", ['spot', 'linear'], help="Linear = Perpetual Futures (Use spot for Binance)")
-    tf = st.selectbox("⏳ Timeframe Resolution", ['15m', '1h', '4h'], index=0)
+    st.markdown("### SYSTEM PARAMETERS")
+    exch_choice = st.selectbox("🌐 Data Provider", ['Gate.io', 'Bybit', 'Delta Exchange', 'Binance'])
+    m_type = st.selectbox("📊 Market Asset", ['spot', 'linear'], help="Linear = Perpetual Futures")
+    tf = st.selectbox("⏳ Timeframe Resolution", ['15m', '1h', '4h'], index=1)
     min_vol = st.number_input("💵 Min Volume (USD)", value=50000, step=10000)
     st.divider()
-    st.caption("Status: STANDBY\n\nAlerts: ACTIVE\n\nLogic: LIVE MARKET ACTION ONLY")
+    st.caption("Status: STANDBY\n\nAlerts: ACTIVE\n\nLogic: CLOSED CANDLE ONLY")
 
 col_control, col_chart = st.columns([1.3, 2])
 
 with col_control:
-    st.markdown(f"### 🔍 SCANNING: `{strategy_choice}`")
-    
     if st.button("EXECUTE MARKET SCAN"):
         status = st.empty()
         bar = st.progress(0)
@@ -333,30 +293,44 @@ with col_control:
         results = []
         for i, s in enumerate(symbols):
             bar.progress((i + 1) / len(symbols))
-            res_list = analyze_asset(ex, s, tf, strategy_choice)
-            
-            if res_list:
-                for res in res_list:
-                    results.append(res)
-                    # Telegram Alerts
-                    send_telegram_alert(f"🏛️ *Shyamswayam Terminal*\n\n🪙 Ticker: {s}\n🎯 Setup: {res['type']}\n💲 Live Price: {res['price']}\n⏳ TF: {tf}\n🌐 Exch: {exch_choice}")
+            res = analyze_asset(ex, s, tf)
+            if res:
+                results.append(res)
+                if res['category'] != 'WATCH':
+                    send_telegram_alert(f"🏛️ *Shyamswayam Terminal*\n\n🪙 Ticker: {s}\n🎯 Setup: {res['type']}\n💲 Close: {res['price']}\n⏳ TF: {tf}\n🌐 Exch: {exch_choice}")
             time.sleep(0.01)
             
-        status.success(f"Scan complete. {len(results)} active setups identified.")
+        status.success(f"Scan complete. {len([r for r in results if r['category'] != 'WATCH'])} confirmed setups identified.")
         bar.empty()
 
-        # Display Results in Clean Institutional Cards
         if results:
-            for r in results:
-                st.markdown(f"""
-                <div class="result-card">
-                    <span class="symbol-label">{r['symbol']}</span> <br>
-                    <span class="setup-label">{r['type']}</span> <br>
-                    <span class="price-label">Live Price: ${r['price']:,.5f}</span>
-                </div>
-                """, unsafe_allow_html=True)
+            tab1, tab2, tab3, tab4 = st.tabs(["💧 SMC Sweeps", "📐 Fibonacci", "📉 Deep Retest", "👀 Watchlist"])
+            
+            with tab1:
+                smc = [r for r in results if r['category'] == 'SMC']
+                if smc:
+                    for r in smc: st.info(f"**{r['symbol']}** — {r['type']} at {r['price']}")
+                else: st.caption("No SMC liquidity sweeps detected on the closed candle.")
+                    
+            with tab2:
+                fib = [r for r in results if r['category'] == 'FIB']
+                if fib:
+                    for r in fib: st.success(f"**{r['symbol']}** — {r['type']} at {r['price']}")
+                else: st.caption("No valid 0.5-0.6 Golden Pocket or A1 Sweep patterns.")
+                    
+            with tab3:
+                deep = [r for r in results if r['category'] == 'DEEP']
+                if deep:
+                    for r in deep: st.warning(f"**{r['symbol']}** — {r['type']} at {r['price']}")
+                else: st.caption("No deep 0.786 pullbacks detected.")
+                
+            with tab4:
+                watch = [r for r in results if r['category'] == 'WATCH']
+                if watch:
+                    for r in watch: st.markdown(f"<div style='border-left: 3px solid #8b949e; padding-left: 10px; margin-bottom: 10px;'>**{r['symbol']}** — {r['type']} at {r['price']}</div>", unsafe_allow_html=True)
+                else: st.caption("No assets are currently entering the 0.5-0.618 radar zone.")
         else:
-            st.info(f"No valid setups found for '{strategy_choice}' at this exact moment.")
+            st.info("No valid trade setups currently detected on the closed candle.")
 
 with col_chart:
     st.markdown("### ASSET VISUALIZATION")

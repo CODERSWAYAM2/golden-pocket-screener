@@ -2,7 +2,6 @@ import ccxt
 import pandas as pd
 import requests
 import time
-import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -65,7 +64,7 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
                 return []
             else: exchange.hostname = 'api.binance.me'
 
-        # DELTA EXCHANGE FIX
+        # DELTA EXCHANGE FIX: CCXT uses 'swap' instead of 'linear' for Delta perpetuals
         if exchange.id == 'delta':
             m_type = 'swap' if m_type == 'linear' else m_type
 
@@ -83,7 +82,7 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
 def get_ohlcv_data(exchange, symbol, tf):
     try:
         if tf == '3h':
-            # Resample 1h data to create synthetic 3h candles aligned to UTC boundaries
+            # Resample 1h data to create synthetic 3h candles
             bars = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=600)
             df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -135,10 +134,11 @@ def analyze_asset(exchange, symbol, tf):
         i_candle = df.iloc[-2] # Current closed candle (Inside)
         m_candle = df.iloc[-3] # Previous candle (Mother)
         
-        # 1. Condition: Wicks are totally inside
+        # 1. Condition: Wicks are totally inside (Body position no longer matters)
         wicks_inside = (i_candle['high'] < m_candle['high']) and (i_candle['low'] > m_candle['low'])
         
         if wicks_inside:
+            
             # 2. Condition: Must be the FIRST inside candle in the recent swing
             recent_structure = df.iloc[-11:-3]
             is_first = True
@@ -162,21 +162,6 @@ def analyze_asset(exchange, symbol, tf):
 
         return None
     except Exception: return None
-
-# ==========================================
-# TIME SYNC ENGINE
-# ==========================================
-def seconds_until_next_3h_close():
-    """Calculates exactly how many seconds are left until the next official 3-hour UTC candle close."""
-    now = datetime.datetime.utcnow()
-    # Crypto 3H intervals start at 0, 3, 6, 9, 12, 15, 18, 21 UTC
-    current_block_hour = (now.hour // 3) * 3
-    # Find the start of the current 3-hour candle, then add 3 hours to get the close time
-    next_close_time = now.replace(hour=current_block_hour, minute=0, second=0, microsecond=0) + datetime.timedelta(hours=3)
-    # Add a 10 second buffer to ensure exchange APIs have fully finalized the new candle data
-    next_close_time += datetime.timedelta(seconds=10)
-    
-    return max(0, (next_close_time - now).total_seconds())
 
 # ==========================================
 # 4. CHART RENDERING
@@ -204,7 +189,7 @@ def render_tv(symbol, exch):
 # 5. DASHBOARD LAYOUT & AUTO-SCANNER
 # ==========================================
 st.markdown("<div class='brand-title'>SHYAMSWAYAM TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='brand-subtitle'>SMC Vectors & Time-Synced Inside Candles</div>", unsafe_allow_html=True)
+st.markdown("<div class='brand-subtitle'>SMC Vectors & Strict Inside Candles Engine</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown("### SYSTEM PARAMETERS")
@@ -214,33 +199,25 @@ with st.sidebar:
     min_vol = st.number_input("💵 Min Volume (USD)", value=50000, step=10000)
     
     st.divider()
-    st.markdown("### 🤖 AUTONOMOUS BOT")
-    auto_mode = st.toggle("Enable 3H Time-Synced Bot")
+    st.markdown("### AUTONOMOUS BOT")
+    auto_mode = st.toggle("🤖 Enable Hourly Auto-Scanner")
     if auto_mode:
-        st.caption("Bot will stay perfectly synchronized with the exchange 3H candle closes. Keep this tab open.")
+        st.caption("Auto-scanner is running. Keep this tab open. It will scan every hour automatically.")
 
 col_control, col_chart = st.columns([1.3, 2])
 
 with col_control:
     
     # -----------------------------------------------------
-    # AUTONOMOUS BACKGROUND SCANNER LOGIC (Time-Synced)
+    # AUTONOMOUS BACKGROUND SCANNER LOGIC
     # -----------------------------------------------------
     if auto_mode:
+        st.warning(f"⏳ Auto-Scanner ACTIVE. Listening for 3h Inside Candles...")
         bot_status = st.empty()
         
         while True:
-            # Calculate precise sleep duration
-            wait_seconds = seconds_until_next_3h_close()
-            next_scan_dt = datetime.datetime.now() + datetime.timedelta(seconds=wait_seconds)
-            next_scan_str = next_scan_dt.strftime('%H:%M:%S')
-            
-            bot_status.info(f"⏳ **BOT STANDBY:** Sleeping until the exact 3H candle close...\n\nNext scan will execute automatically at: **{next_scan_str}**")
-            
-            # Put the script to sleep until the candle officially closes
-            time.sleep(wait_seconds) 
-            
-            bot_status.warning(f"🔔 3H Candle Closed! Fetching data from {exch_choice} and analyzing...")
+            current_time_str = time.strftime('%H:%M:%S')
+            bot_status.info(f"Scan triggered at {current_time_str}. Fetching 3h data...")
             
             ex = get_exchange(exch_choice)
             symbols = get_markets(ex, m_type, min_vol)
@@ -253,8 +230,8 @@ with col_control:
                     send_telegram_alert(f"🤖 *AUTO-SCANNER ALERT*\n\n🪙 Ticker: {s}\n🎯 Setup: {res['type']}\n💲 Close: {res['price']}\n⏳ TF: 3h\n🌐 Exch: {exch_choice}")
                 time.sleep(0.02) 
                 
-            bot_status.success(f"✅ Scan complete. Triggered {found_count} setups. Resetting timer...")
-            time.sleep(10) # Small cooldown before loop restarts to prevent double-firing
+            bot_status.success(f"Scan complete at {time.strftime('%H:%M:%S')}. Found {found_count} setups. Sleeping for 1 hour...")
+            time.sleep(3600) 
     
     # -----------------------------------------------------
     # MANUAL SCANNER LOGIC (If Bot is OFF)

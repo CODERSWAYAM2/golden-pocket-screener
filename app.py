@@ -64,6 +64,10 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
                 return []
             else: exchange.hostname = 'api.binance.me'
 
+        # DELTA EXCHANGE FIX: CCXT uses 'swap' instead of 'linear' for Delta perpetuals
+        if exchange.id == 'delta':
+            m_type = 'swap' if m_type == 'linear' else m_type
+
         exchange.load_markets()
         if hasattr(exchange, 'options'): exchange.options['defaultType'] = m_type
         
@@ -72,6 +76,7 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
         symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
         return symbols[:max_coins]
     except Exception as e: 
+        st.error(f"⚠️ {exchange.name} failed. Error: {e}")
         return []
 
 def get_ohlcv_data(exchange, symbol, tf):
@@ -129,20 +134,12 @@ def analyze_asset(exchange, symbol, tf):
         i_candle = df.iloc[-2] # Current closed candle (Inside)
         m_candle = df.iloc[-3] # Previous candle (Mother)
         
-        # 1. Calculate the strict bodies (Open to Close)
-        i_body_high = max(i_candle['open'], i_candle['close'])
-        i_body_low = min(i_candle['open'], i_candle['close'])
-        m_body_high = max(m_candle['open'], m_candle['close'])
-        m_body_low = min(m_candle['open'], m_candle['close'])
-        
-        # 2. Condition: Body is totally inside, and Wicks are totally inside
-        body_inside = (i_body_high < m_body_high) and (i_body_low > m_body_low)
+        # 1. Condition: Wicks are totally inside (Body position no longer matters)
         wicks_inside = (i_candle['high'] < m_candle['high']) and (i_candle['low'] > m_candle['low'])
         
-        if body_inside and wicks_inside:
+        if wicks_inside:
             
-            # 3. Condition: Must be the FIRST inside candle in the recent swing
-            # Look back at the previous 8 candles. If any were inside candles, invalidate this one.
+            # 2. Condition: Must be the FIRST inside candle in the recent swing
             recent_structure = df.iloc[-11:-3]
             is_first = True
             for k in range(1, len(recent_structure)):
@@ -153,7 +150,7 @@ def analyze_asset(exchange, symbol, tf):
                     break
             
             if is_first:
-                # 4. Condition: Must be at the extreme Top or Bottom of the trend
+                # 3. Condition: Must be at the extreme Top or Bottom of the trend
                 trend_window = df.iloc[-23:-3]
                 recent_high = trend_window['high'].max()
                 recent_low = trend_window['low'].min()
@@ -218,7 +215,6 @@ with col_control:
         st.warning(f"⏳ Auto-Scanner ACTIVE. Listening for 3h Inside Candles...")
         bot_status = st.empty()
         
-        # Infinite background loop for the Bot
         while True:
             current_time_str = time.strftime('%H:%M:%S')
             bot_status.info(f"Scan triggered at {current_time_str}. Fetching 3h data...")
@@ -228,15 +224,14 @@ with col_control:
             
             found_count = 0
             for s in symbols:
-                # Strictly scan 3hr timeframe for the bot
                 res = analyze_asset(ex, s, '3h')
                 if res and res['category'] == 'INSIDE':
                     found_count += 1
                     send_telegram_alert(f"🤖 *AUTO-SCANNER ALERT*\n\n🪙 Ticker: {s}\n🎯 Setup: {res['type']}\n💲 Close: {res['price']}\n⏳ TF: 3h\n🌐 Exch: {exch_choice}")
-                time.sleep(0.02) # Protect API limits
+                time.sleep(0.02) 
                 
             bot_status.success(f"Scan complete at {time.strftime('%H:%M:%S')}. Found {found_count} setups. Sleeping for 1 hour...")
-            time.sleep(3600) # Sleep for exactly 1 hour before scanning again
+            time.sleep(3600) 
     
     # -----------------------------------------------------
     # MANUAL SCANNER LOGIC (If Bot is OFF)

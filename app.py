@@ -12,74 +12,16 @@ st.set_page_config(page_title="Shyamswayam Terminal", page_icon="🏛️", layou
 
 CLASSY_CSS = """
 <style>
-    /* Sleek Dark Slate Background */
-    .stApp {
-        background-color: #0d1117;
-        color: #c9d1d9;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    /* Clean Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #161b22 !important;
-        border-right: 1px solid #30363d;
-    }
-    /* Muted Gold Typography */
-    h1, h2, h3, h4 {
-        color: #d4af37 !important;
-        font-weight: 400 !important;
-        letter-spacing: 1px;
-    }
-    /* Professional Flat Button */
-    .stButton>button {
-        background-color: #1f242c;
-        color: #d4af37;
-        border: 1px solid #d4af37;
-        border-radius: 4px;
-        font-weight: 600;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        transition: all 0.2s ease;
-        width: 100%;
-    }
-    .stButton>button:hover {
-        background-color: #d4af37;
-        color: #0d1117;
-        border-color: #d4af37;
-    }
-    /* Tab Styling for clean organization */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: transparent;
-        border-radius: 0px;
-        color: #8b949e;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #d4af37 !important;
-        border-bottom: 2px solid #d4af37 !important;
-    }
-    /* Branding */
-    .brand-title {
-        font-size: 2rem;
-        font-weight: 900;
-        color: #d4af37;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        text-align: center;
-        margin-bottom: 0px;
-        padding-top: 15px;
-    }
-    .brand-subtitle {
-        color: #8b949e;
-        font-size: 0.9rem;
-        letter-spacing: 1px;
-        text-align: center;
-        margin-bottom: 30px;
-    }
+    .stApp { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; }
+    [data-testid="stSidebar"] { background-color: #161b22 !important; border-right: 1px solid #30363d; }
+    h1, h2, h3, h4 { color: #d4af37 !important; font-weight: 400 !important; letter-spacing: 1px; }
+    .stButton>button { background-color: #1f242c; color: #d4af37; border: 1px solid #d4af37; border-radius: 4px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; transition: all 0.2s ease; width: 100%; }
+    .stButton>button:hover { background-color: #d4af37; color: #0d1117; border-color: #d4af37; }
+    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 0px; color: #8b949e; font-weight: 600; }
+    .stTabs [aria-selected="true"] { color: #d4af37 !important; border-bottom: 2px solid #d4af37 !important; }
+    .brand-title { font-size: 2rem; font-weight: 900; color: #d4af37; text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 0px; padding-top: 15px; }
+    .brand-subtitle { color: #8b949e; font-size: 0.9rem; letter-spacing: 1px; text-align: center; margin-bottom: 30px; }
 </style>
 """
 st.markdown(CLASSY_CSS, unsafe_allow_html=True)
@@ -97,70 +39,61 @@ def send_telegram_alert(message):
     except Exception: pass
 
 def get_exchange(name):
-    """Initializes the selected exchange with heavy-duty India bypass."""
     if name == "Binance":
-        exch = ccxt.binance({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'spot'}
-        })
+        exch = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
         exch.urls['api']['public'] = 'https://api.binance.me/api/v3'
         exch.urls['api']['private'] = 'https://api.binance.me/api/v3'
         exch.hostname = 'api.binance.me' 
         return exch
-        
-    elif name == "Bybit": 
-        return ccxt.bybit({'enableRateLimit': True})
-    elif name == "Delta Exchange": 
-        return ccxt.delta({'enableRateLimit': True})
-        
+    elif name == "Bybit": return ccxt.bybit({'enableRateLimit': True})
+    elif name == "Delta Exchange": return ccxt.delta({'enableRateLimit': True})
     return ccxt.gateio({'enableRateLimit': True})
 
 # ==========================================
 # 3. CORE ALGORITHM ENGINE
 # ==========================================
 def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
-    """Scans for active, liquid markets based on user volume thresholds."""
     try:
         if exchange.id == 'binance':
             if m_type == 'linear':
                 st.warning("⚠️ Binance Futures is strictly blocked in your region. Switch 'Market Asset' to 'spot'.")
                 return []
-            else:
-                exchange.hostname = 'api.binance.me'
+            else: exchange.hostname = 'api.binance.me'
 
         exchange.load_markets()
         if hasattr(exchange, 'options'): exchange.options['defaultType'] = m_type
         
         tickers = exchange.fetch_tickers()
-        symbols = []
-        for sym, tick in tickers.items():
-            if '/USDT' in sym or ':USDT' in sym:
-                vol = tick.get('quoteVolume') or tick.get('baseVolume', 0)
-                if vol and vol >= min_vol: symbols.append(sym)
-                
+        symbols = [sym for sym, tick in tickers.items() if ('/USDT' in sym or ':USDT' in sym) and (tick.get('quoteVolume') or tick.get('baseVolume', 0)) >= min_vol]
         symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
         return symbols[:max_coins]
-        
     except Exception as e: 
         st.error(f"⚠️ {exchange.name} failed. Error: {e}")
         return []
 
-def analyze_asset(exchange, symbol, tf):
-    """
-    The Ultimate Shyamswayam Mathematical Engine.
-    Includes: SMC Sweeps, Watchlist Radar, Golden Pockets, A1 Sweeps, & Deep Pullbacks.
-    Operates STRICTLY on the closed candle.
-    """
+def get_ohlcv_data(exchange, symbol, tf):
+    """Handles standard timeframes and synthetic 3hr candle generation."""
     try:
-        bars = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=200)
-        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        if len(df) < 150: return None
+        if tf == '3h':
+            # Fetch 1h data and resample to 3h to bypass API limitations
+            bars = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=600)
+            df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            df = df.resample('3h', offset='0h').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna().reset_index()
+        else:
+            bars = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=200)
+            df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        return df
+    except Exception: return None
 
-        # --- THE 'JUST-CLOSED' CANDLE LOGIC ---
-        c_open = df['open'].iloc[-2]
-        c_high = df['high'].iloc[-2]
-        c_low = df['low'].iloc[-2]
-        c_close = df['close'].iloc[-2]
+def analyze_asset(exchange, symbol, tf):
+    """SMC Vector Sweeps & Trend-Extreme Inside Candles"""
+    df = get_ohlcv_data(exchange, symbol, tf)
+    if df is None or len(df) < 50: return None
+
+    try:
+        c_open, c_high, c_low, c_close = df['open'].iloc[-2], df['high'].iloc[-2], df['low'].iloc[-2], df['close'].iloc[-2]
         prev_candle = df.iloc[-3]
         
         is_green = c_close > c_open
@@ -170,26 +103,24 @@ def analyze_asset(exchange, symbol, tf):
         # STRATEGY 1: ADVANCED ICT SMC SWEEPS (Sweep + Displacement)
         # ==========================================================
         lookback = 5 
+        # 🔴 Bearish Sweep (BSL)
         for j in range(len(df) - 3, lookback - 1, -1):
-            # 🔴 Bearish Sweep (BSL)
             high_window = df['high'].iloc[j - lookback : j + lookback + 1]
             if df['high'].iloc[j] == high_window.max():
                 pivot_high = df['high'].iloc[j]
                 if c_high > pivot_high and c_close < pivot_high and is_red:
-                    # Vector Candle Engulfs Previous Low
                     if c_close < prev_candle['low']:
                         return {'symbol': symbol, 'category': 'SMC', 'type': '🔴 BSL Sweep + Vector Displacement', 'price': c_close}
                     else:
                         return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 BSL Swept (Need Displacement)', 'price': c_close}
                 break 
 
+        # 🟢 Bullish Sweep (SSL)
         for j in range(len(df) - 3, lookback - 1, -1):
-            # 🟢 Bullish Sweep (SSL)
             low_window = df['low'].iloc[j - lookback : j + lookback + 1]
             if df['low'].iloc[j] == low_window.min():
                 pivot_low = df['low'].iloc[j]
                 if c_low < pivot_low and c_close > pivot_low and is_green:
-                    # Vector Candle Engulfs Previous High
                     if c_close > prev_candle['high']:
                         return {'symbol': symbol, 'category': 'SMC', 'type': '🟢 SSL Sweep + Vector Displacement', 'price': c_close}
                     else:
@@ -197,46 +128,27 @@ def analyze_asset(exchange, symbol, tf):
                 break 
 
         # ==========================================================
-        # STRATEGY 2: TREND-ALIGNED FIBONACCI
+        # STRATEGY 2: TREND-EXTREME INSIDE CANDLES
         # ==========================================================
-        df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
-        if c_close < df['EMA_50'].iloc[-2]: return None # Abort if against trend
-
-        recent_window = df.iloc[-100:-2].reset_index(drop=True)
-        h_idx = recent_window['high'].idxmax()
-        swing_h = recent_window['high'].max()
-        if h_idx == 0: return None
+        i_candle = df.iloc[-2] # Current closed candle
+        m_candle = df.iloc[-3] # Mother candle
         
-        swing_l = recent_window.loc[:h_idx, 'low'].min()
-        swing_rng = swing_h - swing_l
-        if swing_rng == 0 or (swing_rng / swing_l) * 100 < 1.5: return None
-
-        fib_5 = swing_h - (swing_rng * 0.5)
-        fib_618 = swing_h - (swing_rng * 0.618)
-        fib_786 = swing_h - (swing_rng * 0.786)
-
-        # --- A1 Liquidity Sweep ---
-        after_high = recent_window.loc[h_idx:]
-        if len(after_high) > 3:
-            pocket_touches = after_high[(after_high['low'] <= fib_5) & (after_high['low'] >= fib_786)]
-            if not pocket_touches.empty:
-                pocket_low = pocket_touches['low'].min()
-                if is_green and c_low < pocket_low and c_close > pocket_low:
-                    return {'symbol': symbol, 'category': 'FIB', 'type': '🔥 A1 Fib Sweep', 'price': c_close}
-
-        # --- 0.5 to 0.618 Pocket: Validation vs Watchlist ---
-        if (fib_618 * 0.998) <= c_close <= (fib_5 * 1.005):
-            # Check if it meets the Strict Validation rules
-            if is_green and (c_close - c_open) / swing_rng > 0.05: 
-                if not (prev_candle['open'] > fib_5 and prev_candle['close'] < fib_618): 
-                    return {'symbol': symbol, 'category': 'FIB', 'type': '🟡 Validated 0.5-0.6 Pocket', 'price': c_close}
+        # Strict Inside Bar Definition
+        is_inside = (i_candle['high'] < m_candle['high']) and (i_candle['low'] > m_candle['low'])
+        
+        if is_inside:
+            # Look back 20 candles before the mother bar to define the recent trend
+            trend_window = df.iloc[-23:-3]
+            recent_high = trend_window['high'].max()
+            recent_low = trend_window['low'].min()
             
-            # If it's in the zone but NOT validated yet (e.g. still red, setting up)
-            return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 Entering 0.5 Zone', 'price': c_close}
-
-        # --- Deep 0.786 Pullback ---
-        if (fib_786 * 0.998) <= c_close <= (fib_786 * 1.005) and is_green:
-            return {'symbol': symbol, 'category': 'DEEP', 'type': '🔴 0.786 Deep Pullback', 'price': c_close}
+            # Trend TOP Validation: Mother bar must be the highest point of the recent trend
+            if m_candle['high'] >= recent_high * 0.999:
+                return {'symbol': symbol, 'category': 'INSIDE', 'type': '⬇️ Top Trend Inside Bar (Reversal/Breakdown)', 'price': i_candle['close']}
+                
+            # Trend BOTTOM Validation: Mother bar must be the lowest point of the recent trend
+            elif m_candle['low'] <= recent_low * 1.001:
+                return {'symbol': symbol, 'category': 'INSIDE', 'type': '⬆️ Bottom Trend Inside Bar (Reversal/Breakout)', 'price': i_candle['close']}
 
         return None
     except Exception: return None
@@ -246,17 +158,13 @@ def analyze_asset(exchange, symbol, tf):
 # ==========================================
 def render_tv(symbol, exch):
     sym = symbol.split(':')[0].replace('/', '')
-    prefix = "GATEIO"
-    if exch == "Bybit": prefix = "BYBIT"
-    elif exch == "Delta Exchange": prefix = "DELTA"
-    elif exch == "Binance": prefix = "BINANCE"  
-    
+    prefix = {"Gate.io": "GATEIO", "Bybit": "BYBIT", "Delta Exchange": "DELTA", "Binance": "BINANCE"}.get(exch, "BINANCE")
     html = f"""
     <div style="height:550px; border: 1px solid #30363d; border-radius: 4px;">
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         <script type="text/javascript">
         new TradingView.widget({{
-            "autosize": true, "symbol": "{prefix}:{sym}", "interval": "60",
+            "autosize": true, "symbol": "{prefix}:{sym}", "interval": "180",
             "timezone": "Etc/UTC", "theme": "dark", "style": "1",
             "locale": "en", "backgroundColor": "#0d1117", "gridColor": "#161b22",
             "hide_top_toolbar": false, "container_id": "tv"
@@ -271,16 +179,16 @@ def render_tv(symbol, exch):
 # 5. DASHBOARD LAYOUT
 # ==========================================
 st.markdown("<div class='brand-title'>SHYAMSWAYAM TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='brand-subtitle'>Institutional SMC & Fibonacci Analysis Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='brand-subtitle'>SMC Vectors & Price Action Engine</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown("### SYSTEM PARAMETERS")
     exch_choice = st.selectbox("🌐 Data Provider", ['Gate.io', 'Bybit', 'Delta Exchange', 'Binance'])
-    m_type = st.selectbox("📊 Market Asset", ['spot', 'linear'], help="Linear = Perpetual Futures")
-    tf = st.selectbox("⏳ Timeframe Resolution", ['15m', '1h', '4h'], index=1)
+    m_type = st.selectbox("📊 Market Asset", ['spot', 'linear'])
+    tf = st.selectbox("⏳ Timeframe Resolution", ['15m', '1h', '3h', '4h'], index=2) # 3h added and set as default!
     min_vol = st.number_input("💵 Min Volume (USD)", value=50000, step=10000)
     st.divider()
-    st.caption("Status: STANDBY\n\nAlerts: ACTIVE\n\nLogic: CLOSED CANDLE ONLY")
+    st.caption("Status: STANDBY\n\nLogic: CLOSED CANDLE ONLY")
 
 col_control, col_chart = st.columns([1.3, 2])
 
@@ -288,7 +196,6 @@ with col_control:
     if st.button("EXECUTE MARKET SCAN"):
         status = st.empty()
         bar = st.progress(0)
-        
         ex = get_exchange(exch_choice)
         status.caption(f"Connecting to {exch_choice} orderbooks...")
         
@@ -309,35 +216,30 @@ with col_control:
         bar.empty()
 
         if results:
-            tab1, tab2, tab3, tab4 = st.tabs(["💧 SMC Sweeps", "📐 Fibonacci", "📉 Deep Retest", "👀 Watchlist"])
+            tab1, tab2, tab3 = st.tabs(["💧 SMC Sweeps", "🕯️ Inside Candles", "👀 Watchlist"])
             
             with tab1:
                 smc = [r for r in results if r['category'] == 'SMC']
                 if smc:
                     for r in smc: st.info(f"**{r['symbol']}** — {r['type']} at {r['price']}")
-                else: st.caption("No SMC liquidity sweeps detected on the closed candle.")
+                else: st.caption("No SMC liquidity sweeps detected.")
                     
             with tab2:
-                fib = [r for r in results if r['category'] == 'FIB']
-                if fib:
-                    for r in fib: st.success(f"**{r['symbol']}** — {r['type']} at {r['price']}")
-                else: st.caption("No valid 0.5-0.6 Golden Pocket or A1 Sweep patterns.")
-                    
-            with tab3:
-                deep = [r for r in results if r['category'] == 'DEEP']
-                if deep:
-                    for r in deep: st.warning(f"**{r['symbol']}** — {r['type']} at {r['price']}")
-                else: st.caption("No deep 0.786 pullbacks detected.")
+                inside = [r for r in results if r['category'] == 'INSIDE']
+                if inside:
+                    for r in inside: st.success(f"**{r['symbol']}** — {r['type']} at {r['price']}")
+                else: st.caption("No Trend-Extreme Inside Candles detected.")
                 
-            with tab4:
+            with tab3:
                 watch = [r for r in results if r['category'] == 'WATCH']
                 if watch:
                     for r in watch: st.markdown(f"<div style='border-left: 3px solid #8b949e; padding-left: 10px; margin-bottom: 10px;'>**{r['symbol']}** — {r['type']} at {r['price']}</div>", unsafe_allow_html=True)
-                else: st.caption("No assets are currently entering the 0.5-0.618 radar zone.")
+                else: st.caption("Watchlist is currently empty.")
         else:
             st.info("No valid trade setups currently detected on the closed candle.")
 
 with col_chart:
     st.markdown("### ASSET VISUALIZATION")
     chart_sym = st.text_input("Ticker Symbol (e.g., BTC/USDT)", value="BTC/USDT").upper()
+    # Note: Interval "180" in TradingView widget maps to 3 Hours.
     if chart_sym: render_tv(chart_sym, exch_choice)

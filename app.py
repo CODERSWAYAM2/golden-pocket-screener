@@ -42,41 +42,42 @@ def send_telegram_alert(message):
         try: requests.post(url, data=payload, timeout=5)
         except Exception: pass
 
-def get_exchange(name):
+def get_exchange(name, m_type):
+    """Initializes exchange and injects the proper market type BEFORE loading."""
+    
+    # DELTA FIX: Delta strictly uses 'swap' instead of 'linear' for perpetuals
+    if name == "Delta Exchange" and m_type == 'linear':
+        m_type = 'swap'
+        
+    options = {'defaultType': m_type}
+
     if name == "Binance":
-        exch = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
+        exch = ccxt.binance({'enableRateLimit': True, 'options': options})
         exch.urls['api']['public'] = 'https://api.binance.me/api/v3'
         exch.urls['api']['private'] = 'https://api.binance.me/api/v3'
         exch.hostname = 'api.binance.me' 
         return exch
-    elif name == "Bybit": return ccxt.bybit({'enableRateLimit': True})
-    elif name == "Delta Exchange": return ccxt.delta({'enableRateLimit': True})
-    return ccxt.gateio({'enableRateLimit': True})
+    elif name == "Bybit": return ccxt.bybit({'enableRateLimit': True, 'options': options})
+    elif name == "Delta Exchange": return ccxt.delta({'enableRateLimit': True, 'options': options})
+    return ccxt.gateio({'enableRateLimit': True, 'options': options})
 
 # ==========================================
 # 3. CORE ALGORITHM ENGINE
 # ==========================================
 def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
     try:
-        if exchange.id == 'binance':
-            if m_type == 'linear':
-                st.warning("⚠️ Binance Futures is strictly blocked. Switch to 'spot'.")
-                return []
-            else: exchange.hostname = 'api.binance.me'
-
-        # DELTA EXCHANGE FIX: CCXT uses 'swap' instead of 'linear' for Delta perpetuals
-        if exchange.id == 'delta':
-            m_type = 'swap' if m_type == 'linear' else m_type
+        if exchange.id == 'binance' and m_type == 'linear':
+            st.warning("⚠️ Binance Futures is strictly blocked. Switch to 'spot'.")
+            return []
 
         exchange.load_markets()
-        if hasattr(exchange, 'options'): exchange.options['defaultType'] = m_type
         
         tickers = exchange.fetch_tickers()
         symbols = [sym for sym, tick in tickers.items() if ('/USDT' in sym or ':USDT' in sym) and (tick.get('quoteVolume') or tick.get('baseVolume', 0)) >= min_vol]
         symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
         return symbols[:max_coins]
     except Exception as e: 
-        st.error(f"⚠️ {exchange.name} failed. Error: {e}")
+        st.error(f"⚠️ {exchange.name} failed to load markets. Error: {e}")
         return []
 
 def get_ohlcv_data(exchange, symbol, tf):
@@ -138,7 +139,6 @@ def analyze_asset(exchange, symbol, tf):
         wicks_inside = (i_candle['high'] < m_candle['high']) and (i_candle['low'] > m_candle['low'])
         
         if wicks_inside:
-            
             # 2. Condition: Must be the FIRST inside candle in the recent swing
             recent_structure = df.iloc[-11:-3]
             is_first = True
@@ -189,7 +189,7 @@ def render_tv(symbol, exch):
 # 5. DASHBOARD LAYOUT & AUTO-SCANNER
 # ==========================================
 st.markdown("<div class='brand-title'>SHYAMSWAYAM TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='brand-subtitle'>SMC Vectors & Strict Inside Candles Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='brand-subtitle'>SMC Vectors & Hourly Inside Candles Engine</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown("### SYSTEM PARAMETERS")
@@ -199,17 +199,17 @@ with st.sidebar:
     min_vol = st.number_input("💵 Min Volume (USD)", value=50000, step=10000)
     
     st.divider()
-    st.markdown("### AUTONOMOUS BOT")
-    auto_mode = st.toggle("🤖 Enable Hourly Auto-Scanner")
+    st.markdown("### 🤖 AUTONOMOUS BOT")
+    auto_mode = st.toggle("Enable Hourly Auto-Scanner")
     if auto_mode:
-        st.caption("Auto-scanner is running. Keep this tab open. It will scan every hour automatically.")
+        st.caption("Bot will scan continuously every 1 hour. Keep this tab open.")
 
 col_control, col_chart = st.columns([1.3, 2])
 
 with col_control:
     
     # -----------------------------------------------------
-    # AUTONOMOUS BACKGROUND SCANNER LOGIC
+    # AUTONOMOUS BACKGROUND SCANNER LOGIC (Hourly Loop)
     # -----------------------------------------------------
     if auto_mode:
         st.warning(f"⏳ Auto-Scanner ACTIVE. Listening for 3h Inside Candles...")
@@ -219,7 +219,7 @@ with col_control:
             current_time_str = time.strftime('%H:%M:%S')
             bot_status.info(f"Scan triggered at {current_time_str}. Fetching 3h data...")
             
-            ex = get_exchange(exch_choice)
+            ex = get_exchange(exch_choice, m_type)
             symbols = get_markets(ex, m_type, min_vol)
             
             found_count = 0
@@ -231,7 +231,7 @@ with col_control:
                 time.sleep(0.02) 
                 
             bot_status.success(f"Scan complete at {time.strftime('%H:%M:%S')}. Found {found_count} setups. Sleeping for 1 hour...")
-            time.sleep(3600) 
+            time.sleep(3600) # Sleep exactly 1 hour, then loop
     
     # -----------------------------------------------------
     # MANUAL SCANNER LOGIC (If Bot is OFF)
@@ -239,7 +239,8 @@ with col_control:
     elif st.button("EXECUTE MANUAL SCAN"):
         status = st.empty()
         bar = st.progress(0)
-        ex = get_exchange(exch_choice)
+        
+        ex = get_exchange(exch_choice, m_type)
         status.caption(f"Connecting to {exch_choice} orderbooks...")
         
         symbols = get_markets(ex, m_type, min_vol)

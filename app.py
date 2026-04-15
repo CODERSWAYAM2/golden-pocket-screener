@@ -30,13 +30,17 @@ st.markdown(CLASSY_CSS, unsafe_allow_html=True)
 # 2. CONFIGURATION & TELEGRAM
 # ==========================================
 BOT_TOKEN = "8657789671:AAHgmek_WvxFrqkP_F0UomRS-rct1Vk7V1c"
-CHAT_ID = "5868749596"
+CHAT_IDS = [
+    "5868749596",  # Original ID
+    "815001472"    # New ID
+]
 
 def send_telegram_alert(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': CHAT_ID, 'text': message, 'parse_mode': 'Markdown'}
-    try: requests.post(url, data=payload, timeout=5)
-    except Exception: pass
+    for chat_id in CHAT_IDS:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}
+        try: requests.post(url, data=payload, timeout=5)
+        except Exception: pass
 
 def get_exchange(name):
     if name == "Binance":
@@ -56,7 +60,7 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
     try:
         if exchange.id == 'binance':
             if m_type == 'linear':
-                st.warning("⚠️ Binance Futures is strictly blocked in your region. Switch 'Market Asset' to 'spot'.")
+                st.warning("⚠️ Binance Futures is strictly blocked. Switch to 'spot'.")
                 return []
             else: exchange.hostname = 'api.binance.me'
 
@@ -68,14 +72,12 @@ def get_markets(exchange, m_type, min_vol=50000, max_coins=600):
         symbols.sort(key=lambda s: (tickers[s].get('quoteVolume') or 0), reverse=True)
         return symbols[:max_coins]
     except Exception as e: 
-        st.error(f"⚠️ {exchange.name} failed. Error: {e}")
         return []
 
 def get_ohlcv_data(exchange, symbol, tf):
-    """Handles standard timeframes and synthetic 3hr candle generation."""
     try:
         if tf == '3h':
-            # Fetch 1h data and resample to 3h to bypass API limitations
+            # Resample 1h data to create synthetic 3h candles
             bars = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=600)
             df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -88,7 +90,7 @@ def get_ohlcv_data(exchange, symbol, tf):
     except Exception: return None
 
 def analyze_asset(exchange, symbol, tf):
-    """SMC Vector Sweeps & Trend-Extreme Inside Candles"""
+    """SMC Vector Sweeps & Strict, First-in-Trend Inside Candles"""
     df = get_ohlcv_data(exchange, symbol, tf)
     if df is None or len(df) < 50: return None
 
@@ -100,10 +102,9 @@ def analyze_asset(exchange, symbol, tf):
         is_red = c_close < c_open
 
         # ==========================================================
-        # STRATEGY 1: ADVANCED ICT SMC SWEEPS (Sweep + Displacement)
+        # STRATEGY 1: ADVANCED ICT SMC SWEEPS
         # ==========================================================
         lookback = 5 
-        # 🔴 Bearish Sweep (BSL)
         for j in range(len(df) - 3, lookback - 1, -1):
             high_window = df['high'].iloc[j - lookback : j + lookback + 1]
             if df['high'].iloc[j] == high_window.max():
@@ -111,11 +112,8 @@ def analyze_asset(exchange, symbol, tf):
                 if c_high > pivot_high and c_close < pivot_high and is_red:
                     if c_close < prev_candle['low']:
                         return {'symbol': symbol, 'category': 'SMC', 'type': '🔴 BSL Sweep + Vector Displacement', 'price': c_close}
-                    else:
-                        return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 BSL Swept (Need Displacement)', 'price': c_close}
                 break 
 
-        # 🟢 Bullish Sweep (SSL)
         for j in range(len(df) - 3, lookback - 1, -1):
             low_window = df['low'].iloc[j - lookback : j + lookback + 1]
             if df['low'].iloc[j] == low_window.min():
@@ -123,32 +121,47 @@ def analyze_asset(exchange, symbol, tf):
                 if c_low < pivot_low and c_close > pivot_low and is_green:
                     if c_close > prev_candle['high']:
                         return {'symbol': symbol, 'category': 'SMC', 'type': '🟢 SSL Sweep + Vector Displacement', 'price': c_close}
-                    else:
-                        return {'symbol': symbol, 'category': 'WATCH', 'type': '👀 SSL Swept (Need Displacement)', 'price': c_close}
                 break 
 
         # ==========================================================
-        # STRATEGY 2: TREND-EXTREME INSIDE CANDLES
+        # STRATEGY 2: STRICT "FIRST-IN-TREND" INSIDE CANDLES
         # ==========================================================
-        i_candle = df.iloc[-2] # Current closed candle
-        m_candle = df.iloc[-3] # Mother candle
+        i_candle = df.iloc[-2] # Current closed candle (Inside)
+        m_candle = df.iloc[-3] # Previous candle (Mother)
         
-        # Strict Inside Bar Definition
-        is_inside = (i_candle['high'] < m_candle['high']) and (i_candle['low'] > m_candle['low'])
+        # 1. Calculate the strict bodies (Open to Close)
+        i_body_high = max(i_candle['open'], i_candle['close'])
+        i_body_low = min(i_candle['open'], i_candle['close'])
+        m_body_high = max(m_candle['open'], m_candle['close'])
+        m_body_low = min(m_candle['open'], m_candle['close'])
         
-        if is_inside:
-            # Look back 20 candles before the mother bar to define the recent trend
-            trend_window = df.iloc[-23:-3]
-            recent_high = trend_window['high'].max()
-            recent_low = trend_window['low'].min()
+        # 2. Condition: Body is totally inside, and Wicks are totally inside
+        body_inside = (i_body_high < m_body_high) and (i_body_low > m_body_low)
+        wicks_inside = (i_candle['high'] < m_candle['high']) and (i_candle['low'] > m_candle['low'])
+        
+        if body_inside and wicks_inside:
             
-            # Trend TOP Validation: Mother bar must be the highest point of the recent trend
-            if m_candle['high'] >= recent_high * 0.999:
-                return {'symbol': symbol, 'category': 'INSIDE', 'type': '⬇️ Top Trend Inside Bar (Reversal/Breakdown)', 'price': i_candle['close']}
+            # 3. Condition: Must be the FIRST inside candle in the recent swing
+            # Look back at the previous 8 candles. If any were inside candles, invalidate this one.
+            recent_structure = df.iloc[-11:-3]
+            is_first = True
+            for k in range(1, len(recent_structure)):
+                past_i = recent_structure.iloc[k]
+                past_m = recent_structure.iloc[k-1]
+                if (past_i['high'] < past_m['high']) and (past_i['low'] > past_m['low']):
+                    is_first = False
+                    break
+            
+            if is_first:
+                # 4. Condition: Must be at the extreme Top or Bottom of the trend
+                trend_window = df.iloc[-23:-3]
+                recent_high = trend_window['high'].max()
+                recent_low = trend_window['low'].min()
                 
-            # Trend BOTTOM Validation: Mother bar must be the lowest point of the recent trend
-            elif m_candle['low'] <= recent_low * 1.001:
-                return {'symbol': symbol, 'category': 'INSIDE', 'type': '⬆️ Bottom Trend Inside Bar (Reversal/Breakout)', 'price': i_candle['close']}
+                if m_candle['high'] >= recent_high * 0.999:
+                    return {'symbol': symbol, 'category': 'INSIDE', 'type': '⬇️ Top Trend First Inside Bar', 'price': i_candle['close']}
+                elif m_candle['low'] <= recent_low * 1.001:
+                    return {'symbol': symbol, 'category': 'INSIDE', 'type': '⬆️ Bottom Trend First Inside Bar', 'price': i_candle['close']}
 
         return None
     except Exception: return None
@@ -176,24 +189,59 @@ def render_tv(symbol, exch):
     components.html(html, height=550)
 
 # ==========================================
-# 5. DASHBOARD LAYOUT
+# 5. DASHBOARD LAYOUT & AUTO-SCANNER
 # ==========================================
 st.markdown("<div class='brand-title'>SHYAMSWAYAM TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='brand-subtitle'>SMC Vectors & Price Action Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='brand-subtitle'>SMC Vectors & Strict Inside Candles Engine</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown("### SYSTEM PARAMETERS")
     exch_choice = st.selectbox("🌐 Data Provider", ['Gate.io', 'Bybit', 'Delta Exchange', 'Binance'])
     m_type = st.selectbox("📊 Market Asset", ['spot', 'linear'])
-    tf = st.selectbox("⏳ Timeframe Resolution", ['15m', '1h', '3h', '4h'], index=2) # 3h added and set as default!
+    tf = st.selectbox("⏳ Timeframe", ['15m', '1h', '3h', '4h'], index=2) 
     min_vol = st.number_input("💵 Min Volume (USD)", value=50000, step=10000)
+    
     st.divider()
-    st.caption("Status: STANDBY\n\nLogic: CLOSED CANDLE ONLY")
+    st.markdown("### AUTONOMOUS BOT")
+    auto_mode = st.toggle("🤖 Enable Hourly Auto-Scanner")
+    if auto_mode:
+        st.caption("Auto-scanner is running. Keep this tab open. It will scan every hour automatically.")
 
 col_control, col_chart = st.columns([1.3, 2])
 
 with col_control:
-    if st.button("EXECUTE MARKET SCAN"):
+    
+    # -----------------------------------------------------
+    # AUTONOMOUS BACKGROUND SCANNER LOGIC
+    # -----------------------------------------------------
+    if auto_mode:
+        st.warning(f"⏳ Auto-Scanner ACTIVE. Listening for 3h Inside Candles...")
+        bot_status = st.empty()
+        
+        # Infinite background loop for the Bot
+        while True:
+            current_time_str = time.strftime('%H:%M:%S')
+            bot_status.info(f"Scan triggered at {current_time_str}. Fetching 3h data...")
+            
+            ex = get_exchange(exch_choice)
+            symbols = get_markets(ex, m_type, min_vol)
+            
+            found_count = 0
+            for s in symbols:
+                # Strictly scan 3hr timeframe for the bot
+                res = analyze_asset(ex, s, '3h')
+                if res and res['category'] == 'INSIDE':
+                    found_count += 1
+                    send_telegram_alert(f"🤖 *AUTO-SCANNER ALERT*\n\n🪙 Ticker: {s}\n🎯 Setup: {res['type']}\n💲 Close: {res['price']}\n⏳ TF: 3h\n🌐 Exch: {exch_choice}")
+                time.sleep(0.02) # Protect API limits
+                
+            bot_status.success(f"Scan complete at {time.strftime('%H:%M:%S')}. Found {found_count} setups. Sleeping for 1 hour...")
+            time.sleep(3600) # Sleep for exactly 1 hour before scanning again
+    
+    # -----------------------------------------------------
+    # MANUAL SCANNER LOGIC (If Bot is OFF)
+    # -----------------------------------------------------
+    elif st.button("EXECUTE MANUAL SCAN"):
         status = st.empty()
         bar = st.progress(0)
         ex = get_exchange(exch_choice)
@@ -216,30 +264,23 @@ with col_control:
         bar.empty()
 
         if results:
-            tab1, tab2, tab3 = st.tabs(["💧 SMC Sweeps", "🕯️ Inside Candles", "👀 Watchlist"])
+            tab1, tab2 = st.tabs(["🕯️ Inside Candles", "💧 SMC Sweeps"])
             
             with tab1:
-                smc = [r for r in results if r['category'] == 'SMC']
-                if smc:
-                    for r in smc: st.info(f"**{r['symbol']}** — {r['type']} at {r['price']}")
-                else: st.caption("No SMC liquidity sweeps detected.")
-                    
-            with tab2:
                 inside = [r for r in results if r['category'] == 'INSIDE']
                 if inside:
                     for r in inside: st.success(f"**{r['symbol']}** — {r['type']} at {r['price']}")
                 else: st.caption("No Trend-Extreme Inside Candles detected.")
                 
-            with tab3:
-                watch = [r for r in results if r['category'] == 'WATCH']
-                if watch:
-                    for r in watch: st.markdown(f"<div style='border-left: 3px solid #8b949e; padding-left: 10px; margin-bottom: 10px;'>**{r['symbol']}** — {r['type']} at {r['price']}</div>", unsafe_allow_html=True)
-                else: st.caption("Watchlist is currently empty.")
+            with tab2:
+                smc = [r for r in results if r['category'] == 'SMC']
+                if smc:
+                    for r in smc: st.info(f"**{r['symbol']}** — {r['type']} at {r['price']}")
+                else: st.caption("No SMC liquidity sweeps detected.")
         else:
             st.info("No valid trade setups currently detected on the closed candle.")
 
 with col_chart:
     st.markdown("### ASSET VISUALIZATION")
     chart_sym = st.text_input("Ticker Symbol (e.g., BTC/USDT)", value="BTC/USDT").upper()
-    # Note: Interval "180" in TradingView widget maps to 3 Hours.
     if chart_sym: render_tv(chart_sym, exch_choice)

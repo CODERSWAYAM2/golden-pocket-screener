@@ -11,19 +11,34 @@ from datetime import datetime
 st.set_page_config(page_title="Bulls Thrive | Pro Scanner", page_icon="🐃", layout="wide")
 
 st.title("🐃 Bulls Thrive | Pending Breakout Scanner")
-st.markdown("Scans the F&O Universe for live inside candles **AND** past inside candles that are still coiled and waiting to break out.")
+st.markdown("Scans the F&O Universe for live inside candles and coiled breakouts.")
 
-# --- SECURE SIDEBAR FOR CREDENTIALS ---
+# --- SECURE SIDEBAR FOR CREDENTIALS & SETTINGS ---
 with st.sidebar:
     st.header("🔑 API Credentials")
-    st.markdown("Enter your tokens below to run the scan securely.")
-    
     UPSTOX_TOKEN = st.text_input("Upstox Access Token", type="password")
-    TG_BOT_TOKEN = st.text_input("Telegram Bot Token", type="password")
-    TG_CHAT_ID = st.text_input("Telegram Chat ID", type="password")
+    TG_BOT_TOKEN = st.text_input("Telegram Bot Token (Optional)", type="password")
+    TG_CHAT_ID = st.text_input("Telegram Chat ID (Optional)", type="password")
     
     st.markdown("---")
-    st.caption("🔒 Tokens are only stored in your current browser session and are never saved.")
+    
+    st.header("⚙️ Scanner Settings")
+    st.markdown("Adjust these to find more or fewer stocks.")
+    
+    # NEW UI CONTROLS TO GET MORE RESULTS
+    require_strict_wicks = st.checkbox(
+        "Strict Wicks (Very Rare)", 
+        value=False, 
+        help="If unchecked, only the real body (Open/Close) needs to be inside. This finds vastly more stocks."
+    )
+    
+    lookback_depth = st.slider(
+        "Max Coiled Periods", 
+        min_value=1, 
+        max_value=15, 
+        value=5, 
+        help="How many 30m candles back should we look for an unbroken inside candle?"
+    )
 
 # =============================================================================
 # 📊 STOCK UNIVERSE
@@ -103,37 +118,36 @@ def detect_trend(candles):
     if last_close < last_ema9 and last_ema9 < last_ema21: return "downtrend"
     return "neutral"
 
-def scan_symbol(symbol):
+def scan_symbol(symbol, strict_wicks, lookback):
     candles = fetch_live_candles(symbol)
     if not candles or len(candles) < 20: return None
     
     n = len(candles)
     
-    # 🕵️ THE TIME MACHINE LOOP: Look back up to 15 candles for an inside bar
-    for i in range(n - 1, n - 16, -1):
+    # Scan backward up to 'lookback' periods
+    for i in range(n - 1, n - 1 - lookback, -1):
         last = candles[i]
         mother = candles[i-1]
         
-        # 1. Check if Wicks are strictly inside
-        if not (last['high'] <= mother['high'] and last['low'] >= mother['low']): continue
-        
-        # 2. Check if Full Body is strictly inside
+        # 1. Body strictly inside (Always Required)
         inside_body_top = max(last['open'], last['close'])
         inside_body_bottom = min(last['open'], last['close'])
         if not (inside_body_top <= mother['high'] and inside_body_bottom >= mother['low']): continue
+        
+        # 2. Wicks strictly inside (Optional based on user toggle)
+        if strict_wicks:
+            if not (last['high'] <= mother['high'] and last['low'] >= mother['low']): continue
             
         range_val = mother['high'] - mother['low']
         if range_val < 0.001: continue
         
-        # 3. VERIFY PENDING BREAKOUT: Has it broken out since it formed?
+        # 3. VERIFY PENDING BREAKOUT
         broke_out = False
         for j in range(i + 1, n):
-            # If any candle *after* the inside candle breached the mother's high or low
             if candles[j]['high'] > mother['high'] or candles[j]['low'] < mother['low']:
                 broke_out = True
                 break
                 
-        # If it hasn't broken out, we found a coiled setup!
         if not broke_out:
             inside_range = last['high'] - last['low']
             compression = round((1 - inside_range / range_val) * 100, 1)
@@ -141,10 +155,7 @@ def scan_symbol(symbol):
             trend = detect_trend(candles)
             trend_display = "🟢 UPTREND" if trend == "uptrend" else "🔴 DOWNTREND" if trend == "downtrend" else "🟡 NEUTRAL"
             
-            # Calculate how many 30m periods it has been stuck inside
             periods_coiled = (n - 1) - i
-            
-            # Current Market Price is always the absolute latest candle
             cmp_raw = candles[-1]['close'] 
             
             return {
@@ -175,8 +186,6 @@ def send_telegram_alert(alerts):
     
     for a in alerts[:20]: 
         trend_icon = "🟢" if a['_raw_trend'] == 'uptrend' else "🔴" if a['_raw_trend'] == 'downtrend' else "🟡"
-        
-        # Add a fire emoji if it's been coiling for a long time
         coil_str = f"🔥 Coiled for {a['Coiled (Periods)']} candles!" if a['Coiled (Periods)'] > 1 else "New Inside Candle"
         
         msg += f"{trend_icon} <b>{a['Symbol']}</b> ({coil_str})\n"
@@ -196,30 +205,30 @@ if st.button("🚀 Run Live Market Scan", type="primary", use_container_width=Tr
         st.error("⚠️ Please enter your Upstox Access Token in the sidebar first.")
         st.stop()
 
-    with st.status(f"Scanning {len(ALL_SYMBOLS)} stocks for Master Candles...", expanded=True) as status:
+    with st.status(f"Scanning {len(ALL_SYMBOLS)} stocks with your custom settings...", expanded=True) as status:
         found_alerts = []
         progress_bar = st.progress(0)
         
         for i, symbol in enumerate(ALL_SYMBOLS):
-            result = scan_symbol(symbol)
+            # Pass the sidebar settings into the scan function
+            result = scan_symbol(symbol, require_strict_wicks, lookback_depth)
+            
             if result:
                 found_alerts.append(result)
             
             progress_bar.progress((i + 1) / len(ALL_SYMBOLS))
             time.sleep(0.15) 
 
-        status.update(label=f"Scan Complete! Found {len(found_alerts)} pending setups.", state="complete")
+        status.update(label=f"Scan Complete! Found {len(found_alerts)} setups.", state="complete")
 
     if found_alerts:
         send_telegram_alert(found_alerts)
         
-        st.subheader(f"🎯 {len(found_alerts)} Coiled Setups Detected")
+        st.subheader(f"🎯 {len(found_alerts)} Setups Detected")
         df = pd.DataFrame(found_alerts)
         
-        # Sort by longest coiled first, then by highest compression
         display_df = df.sort_values(by=["_raw_coiled", "Comp (%)"], ascending=[False, False]).drop(columns=['_raw_trend', '_raw_coiled']).reset_index(drop=True)
         
-        # Streamlit styling for the new column
         st.dataframe(
             display_df, 
             use_container_width=True,
@@ -232,4 +241,4 @@ if st.button("🚀 Run Live Market Scan", type="primary", use_container_width=Tr
         if TG_BOT_TOKEN and TG_CHAT_ID:
             st.success("✅ Telegram Alert successfully fired to your community!")
     else:
-        st.info("No inside candles or pending breakouts found in this session.")
+        st.info("Still no inside candles found. Try increasing the 'Max Coiled Periods' slider in the sidebar and running again.")
